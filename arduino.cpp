@@ -127,6 +127,16 @@ void play_sound(const ulong samples_to_play)
 		:			  \
 		: "I" (_SFR_IO_ADDR(PORTB)))
 
+#define PLAY_EMPTY_BIT_AND_AMPLIFY2X()	\
+	__asm__ __volatile__ (\
+		"rol %1       \n\t"\
+		"cbi %2,0     \n\t"	/* 2 clocks */ \
+		"rol %0       \n\t"\
+		"sbi %2,0     \n\t"	/* 2 clocks */ \
+					  \
+		: "+d" (val_hi), "+d" (val_lo)		\
+		: "I" (_SFR_IO_ADDR(PORTB)))
+
 #define PLAY_EMPTY_4_BITS_AND_LOAD_VALUES()	\
 	{ ushort tmp; \
 	__asm__ __volatile__ (\
@@ -206,9 +216,9 @@ void play_sound(const ulong samples_to_play)
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
 
-		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_2_BITS_AND_READ_VALUES_FROM_SD_CARD();
+		PLAY_EMPTY_BIT_AND_AMPLIFY2X();
+		PLAY_EMPTY_BIT_AND_AMPLIFY2X();
 		// PLAY_EMPTY_4_BITS_AND_LOAD_VALUES();
 
 		PLAY_EMPTY_2_BITS_AND_LOOP_END();
