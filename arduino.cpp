@@ -52,7 +52,7 @@ void play_sound(const ulong samples_to_play)
 		"nop		  \n\t"\
 		"sbi %1,0     \n\t"	/* 2 clocks */ \
 					  \
-		: "=r" (tmp)			\
+		: "=d" (tmp)			\
 		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD))); }
 
 #define PLAY_EMPTY_SET_LRCLK1()	\
@@ -64,7 +64,7 @@ void play_sound(const ulong samples_to_play)
 		"nop		  \n\t"\
 		"sbi %1,0     \n\t"	/* 2 clocks */ \
 					  \
-		: "=r" (tmp)			\
+		: "=d" (tmp)			\
 		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD))); }
 
 #define PLAY_EMPTY_2_BITS_AND_LOOP_END()	\
@@ -84,7 +84,7 @@ void play_sound(const ulong samples_to_play)
 		"rjmp 1b	  \n\t"	/* 2 clocks */ \
 		"2:           \n\t"\
 					  \
-		: "=r" (even_counter0), "=d" (even_counter1), "=d" (even_counter2)		\
+		: "=d" (even_counter0), "=d" (even_counter1), "=d" (even_counter2)		\
 		: "I" (_SFR_IO_ADDR(PORTB)), "0" (even_counter0), "1" (even_counter1), "2" (even_counter2))
 
 #define PLAY_EMPTY_AND_LOOP_START()	\
@@ -112,7 +112,7 @@ void play_sound(const ulong samples_to_play)
 		"ldi %A2,lo8(sound_data)   \n\t"\
 		"ldi %B2,hi8(sound_data)   \n\t"\
 		"out %4,%3    \n\t"\
-		"ldi %0,0     \n\t"\
+		"clr %0       \n\t"\
 		"sbi %4,0     \n\t"	/* 2 clocks */ \
 					  \
 		"add %A2,%3   \n\t"\
