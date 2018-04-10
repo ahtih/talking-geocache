@@ -131,7 +131,7 @@ void play_sound(const ulong samples_to_play)
 		"nop		  \n\t"\
 		"sbi %4,0     \n\t"	/* 2 clocks */ \
 					  \
-		: "=r" (val1), "=r" (val2), "=e" (tmp) 			\
+		: "=r" (val_hi), "=r" (val_lo), "=e" (tmp) 			\
 		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB))); }
 
 
@@ -139,26 +139,26 @@ void play_sound(const ulong samples_to_play)
 	uchar even_counter0=(samples_to_playx2 & 0xff);
 	uchar even_counter1=((samples_to_playx2 >> 8) & 0xff);
 	uchar even_counter2=((samples_to_playx2 >> 16) & 0xff);
-	uchar val1=0,val2=0;
+	uchar val_hi=0,val_lo=0;
 
 	while (1) {
 		PLAY_EMPTY_AND_LOOP_START();
 		PLAY_EMPTY_SET_LRCLK0();
 
-		PLAY_FIRST_2_BITS(val1);
-		PLAY_NEXT_BIT(val1);
-		PLAY_NEXT_BIT(val1);
-		PLAY_NEXT_BIT(val1);
-		PLAY_NEXT_BIT(val1);
-		PLAY_NEXT_BIT(val1);
-		PLAY_NEXT_BIT(val1);
+		PLAY_FIRST_2_BITS(val_hi);
+		PLAY_NEXT_BIT(val_hi);
+		PLAY_NEXT_BIT(val_hi);
+		PLAY_NEXT_BIT(val_hi);
+		PLAY_NEXT_BIT(val_hi);
+		PLAY_NEXT_BIT(val_hi);
+		PLAY_NEXT_BIT(val_hi);
 
-		PLAY_FIRST_2_BITS(val2);
-		PLAY_NEXT_BIT(val2);
-		PLAY_NEXT_BIT(val2);
-		PLAY_NEXT_BIT(val2);
-		PLAY_NEXT_BIT(val2);
-		PLAY_NEXT_BIT(val2);
+		PLAY_FIRST_2_BITS(val_lo);
+		PLAY_NEXT_BIT(val_lo);
+		PLAY_NEXT_BIT(val_lo);
+		PLAY_NEXT_BIT(val_lo);
+		PLAY_NEXT_BIT(val_lo);
+		PLAY_NEXT_BIT(val_lo);
 		PLAY_EMPTY_SET_LRCLK1();
 
 		PLAY_EMPTY_BIT();
@@ -258,8 +258,8 @@ void setup(void)
 
 	SD_card_CS_high();
 
-	// Init SPI
-	SPCR=(1 << SPE) | (1 << MSTR) | (1 << SPR1) | (1 << SPR0);
+	// Init SPI at Fosc/2 = 4MHz
+	SPCR=(1 << SPE) | (1 << MSTR) | (0 << SPR1) | (0 << SPR0);
 	SPSR&=~(1 << SPI2X);
 
 		// Wait 74+ clock cycles with CS high
@@ -292,6 +292,7 @@ bool start_SD_card_read(const ulong block_idx)
 		if (SD_card_command(0,0,0x95) == 1)
 			break;
 		if ((ushort)(millis() - start_time) > 2000) {
+			SD_card_CS_high();
 			Serial.println("CMD0 returned error");
 			return false;
 			}
@@ -309,6 +310,7 @@ bool start_SD_card_read(const ulong block_idx)
 		if (SD_card_Acommand(41,0x40000000) == 0)
 			break;
 		if ((ushort)(millis() - start_time) > 2000) {
+			SD_card_CS_high();
 			Serial.println("ACMD41 returned error");
 			return false;
 			}
@@ -316,6 +318,7 @@ bool start_SD_card_read(const ulong block_idx)
 	Serial.println("  ACMD41 done");
 
 	if (SD_card_command(58,0)) {
+		SD_card_CS_high();
 		Serial.println("CMD58 returned error");
 		return false;
 		}
@@ -328,6 +331,7 @@ bool start_SD_card_read(const ulong block_idx)
 	Serial.println("  SD card inited");
 
 	if (SD_card_command(18,block_idx)) {
+		SD_card_CS_high();
 		Serial.println("CMD18 returned error");
 		return false;
 		}
@@ -338,10 +342,12 @@ bool start_SD_card_read(const ulong block_idx)
 		if (status == 0xfe)
 			break;
 		if (status != 0xff) {
+			SD_card_CS_high();
 			Serial.println("Read block start error");
 			return false;
 			}
 		if ((ushort)(millis() - start_time) > 300) {
+			SD_card_CS_high();
 			Serial.println("Read block start timeout");
 			return false;
 			}
@@ -368,19 +374,19 @@ void SD_card_read_blocks(const uint nr_of_blocks)
 
 void loop(void)
 {
-	delay(2000);
-	if (start_SD_card_read(0UL))
-		SD_card_read_blocks(2);
-
 	{ for (uchar i=0;i < 128;i++) {
 		sound_data[i]=bitreverse(
 						(i < 64) ? 20 : (ushort)-20
 						);
 		}}
 
+	delay(2000);
+	if (start_SD_card_read(0UL))
+		SD_card_read_blocks(2);
+
 	cli();
 	while (1)
 		play_sound(2*(F_CPU/(6*2*16)));
-
+	SD_card_CS_high();
 	sei();
 	}
