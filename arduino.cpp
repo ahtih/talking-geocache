@@ -155,6 +155,23 @@ void play_sound(const ulong samples_to_play)
 		: "=r" (val_hi), "=r" (val_lo), "=e" (tmp) 			\
 		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB))); }
 
+#define PLAY_EMPTY_2_BITS_AND_READ_VALUES_FROM_SD_CARD()	\
+	__asm__ __volatile__ (\
+		"in %1,%2     \n\t"\
+		"ser %0       \n\t"\
+		"out %3,%4    \n\t"\
+		"out %2,%0    \n\t"\
+		"sbi %3,0     \n\t"	/* 2 clocks */ \
+					  \
+		"mov %0,%1    \n\t"\
+		"andi %0,1    \n\t"\
+		"out %3,%4    \n\t"\
+		"neg %0       \n\t"\
+		"sbi %3,0     \n\t"	/* 2 clocks */ \
+					  \
+		: "=d" (val_hi), "=r" (val_lo) 	\
+		: "I" (_SFR_IO_ADDR(SPDR)), "I" (_SFR_IO_ADDR(PORTB)), "r" (even_counter0))
+
 
 	const ulong samples_to_playx2=samples_to_play << 1;
 	uchar even_counter0=(samples_to_playx2 & 0xff);
@@ -189,7 +206,11 @@ void play_sound(const ulong samples_to_play)
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
 
-		PLAY_EMPTY_4_BITS_AND_LOAD_VALUES();
+		PLAY_EMPTY_BIT();
+		PLAY_EMPTY_BIT();
+		PLAY_EMPTY_2_BITS_AND_READ_VALUES_FROM_SD_CARD();
+		// PLAY_EMPTY_4_BITS_AND_LOAD_VALUES();
+
 		PLAY_EMPTY_2_BITS_AND_LOOP_END();
 
 		if (even_counter2 == 0xff)
