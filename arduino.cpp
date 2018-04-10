@@ -55,16 +55,28 @@ void play_sound(const ulong samples_to_play)
 		: "=d" (tmp)			\
 		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD))); }
 
-#define PLAY_EMPTY_SET_LRCLK1()	\
+#define PLAY_LAST_3_BITS_SET_LRCLK1(reg)	\
 	{ uchar tmp;\
 	__asm__ __volatile__ (\
-		"ldi %0,0x80  \n\t"\
+		"lsr %0       \n\t"\
+		"andi %0,0xfe \n\t"\
 		"out %2,%0    \n\t"\
-		"out %1,%0    \n\t"\
-		"nop		  \n\t"\
-		"sbi %1,0     \n\t"	/* 2 clocks */ \
+		"lsr %0       \n\t"\
+		"sbi %2,0     \n\t"	/* 2 clocks */ \
 					  \
-		: "=d" (tmp)			\
+		"andi %0,0xfe \n\t"\
+		"ldi %1,0x80  \n\t"\
+		"out %2,%0    \n\t"\
+		"lsr %0       \n\t"\
+		"sbi %2,0     \n\t"	/* 2 clocks */ \
+					  \
+		"andi %0,0xfe \n\t"\
+		"out %3,%1    \n\t"\
+		"out %2,%0    \n\t"\
+		"nop		  \n\t"\
+		"sbi %2,0     \n\t"	/* 2 clocks */ \
+					  \
+		: "+d" (reg), "=d" (tmp)			\
 		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD))); }
 
 #define PLAY_EMPTY_2_BITS_AND_LOOP_END()	\
@@ -157,9 +169,7 @@ void play_sound(const ulong samples_to_play)
 		PLAY_NEXT_BIT(val_lo);
 		PLAY_NEXT_BIT(val_lo);
 		PLAY_NEXT_BIT(val_lo);
-		PLAY_NEXT_BIT(val_lo);
-		PLAY_NEXT_BIT(val_lo);
-		PLAY_EMPTY_SET_LRCLK1();
+		PLAY_LAST_3_BITS_SET_LRCLK1(val_lo);
 
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
