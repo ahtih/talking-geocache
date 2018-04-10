@@ -20,11 +20,13 @@ void play_sound(const ulong samples_to_play)
 		"clc          \n\t"\
 		"rol %0       \n\t"\
 		"out %1,%0    \n\t"\
+		"nop		  \n\t"\
 		"sbi %1,0     \n\t"	/* 2 clocks */ \
 					  \
 		"ror %0       \n\t"\
 		"andi %0,0xfe \n\t"\
 		"out %1,%0    \n\t"\
+		"nop		  \n\t"\
 		"sbi %1,0     \n\t"	/* 2 clocks */ \
 					  \
 		: "+d" (reg)			\
@@ -35,6 +37,7 @@ void play_sound(const ulong samples_to_play)
 		"lsr %0       \n\t"\
 		"andi %0,0xfe \n\t"\
 		"out %1,%0    \n\t"\
+		"nop		  \n\t"\
 		"sbi %1,0     \n\t"	/* 2 clocks */ \
 					  \
 		: "+d" (reg)			\
@@ -43,97 +46,91 @@ void play_sound(const ulong samples_to_play)
 #define PLAY_EMPTY_SET_LRCLK0()	\
 	{ uchar tmp;\
 	__asm__ __volatile__ (\
-		"ldi %0,0    \n\t"\
-		"out %2,%0   \n\t"\
-		"out %1,%0   \n\t"\
-		"sbi %1,0    \n\t"	/* 2 clocks */ \
-					 \
+		"ldi %0,0     \n\t"\
+		"out %2,%0    \n\t"\
+		"out %1,%0    \n\t"\
+		"nop		  \n\t"\
+		"sbi %1,0     \n\t"	/* 2 clocks */ \
+					  \
 		: "=r" (tmp)			\
 		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD))); }
 
 #define PLAY_EMPTY_SET_LRCLK1()	\
 	{ uchar tmp;\
 	__asm__ __volatile__ (\
-		"ldi %0,0x80 \n\t"\
-		"out %2,%0   \n\t"\
-		"out %1,%0   \n\t"\
-		"sbi %1,0    \n\t"	/* 2 clocks */ \
-					 \
+		"ldi %0,0x80  \n\t"\
+		"out %2,%0    \n\t"\
+		"out %1,%0    \n\t"\
+		"nop		  \n\t"\
+		"sbi %1,0     \n\t"	/* 2 clocks */ \
+					  \
 		: "=r" (tmp)			\
 		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD))); }
 
 #define PLAY_EMPTY_2_BITS_AND_LOOP_END()	\
 	__asm__ __volatile__ (\
 		"subi %0,2    \n\t"\
-		"sbci %1,0   \n\t"\
-		"out %3,%0   \n\t"\
-		"sbi %3,0    \n\t"	/* 2 clocks */ \
-					 \
-		"sbci %2,0   \n\t"\
-		"brcs 2f     \n\t"	/* 1 clock if not taken */ \
-		"out %3,%0   \n\t"\
-		"sbi %3,0    \n\t"	/* 2 clocks */ \
-					 \
-		"rjmp 1b	 \n\t"	/* 2 clocks */ \
-		"2:          \n\t"\
-					 \
+		"sbci %1,0    \n\t"\
+		"out %3,%0    \n\t"\
+		"sbci %2,0    \n\t"\
+		"sbi %3,0     \n\t"	/* 2 clocks */ \
+					  \
+		"brcs 2f      \n\t"	/* 1 clock if not taken */ \
+		"nop		  \n\t"\
+		"out %3,%0    \n\t"\
+		"nop		  \n\t"\
+		"sbi %3,0     \n\t"	/* 2 clocks */ \
+					  \
+		"rjmp 1b	  \n\t"	/* 2 clocks */ \
+		"2:           \n\t"\
+					  \
 		: "=r" (even_counter0), "=d" (even_counter1), "=d" (even_counter2)		\
 		: "I" (_SFR_IO_ADDR(PORTB)), "0" (even_counter0), "1" (even_counter1), "2" (even_counter2))
 
 #define PLAY_EMPTY_AND_LOOP_START()	\
 	__asm__ __volatile__ (\
 		"1: out %1,%0 \n\t"\
-		"sbi %1,0    \n\t"	/* 2 clocks */ \
-					 \
-		:			 \
+		"nop		  \n\t"\
+		"sbi %1,0     \n\t"	/* 2 clocks */ \
+					  \
+		:			  \
 		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB)))
 
 #define PLAY_EMPTY_BIT()	\
 	__asm__ __volatile__ (\
-		"nop         \n\t"\
-		"nop         \n\t"\
-		"out %1,%0   \n\t"\
-		"sbi %1,0    \n\t"	/* 2 clocks */ \
-					 \
-		:			 \
-		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB)))
+		"nop          \n\t"\
+		"cbi %0,0     \n\t"	/* 2 clocks */ \
+		"nop		  \n\t"\
+		"sbi %0,0     \n\t"	/* 2 clocks */ \
+					  \
+		:			  \
+		: "I" (_SFR_IO_ADDR(PORTB)))
 
-#define PLAY_EMPTY_SET_VALUE(value_dest,value_src)	\
-	__asm__ __volatile__ (\
-		"mov %0,%3   \n\t"\
-		"nop         \n\t"\
-		"out %2,%1   \n\t"\
-		"sbi %2,0    \n\t"	/* 2 clocks */ \
-					 \
-		: "=r" (value_dest)			\
-		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB)), "r" (value_src))
-
-#define PLAY_EMPTY_5_BITS_AND_LOAD_VALUES()	\
+#define PLAY_EMPTY_4_BITS_AND_LOAD_VALUES()	\
 	{ ushort tmp; \
 	__asm__ __volatile__ (\
 		"ldi %A2,lo8(sound_data)   \n\t"\
 		"ldi %B2,hi8(sound_data)   \n\t"\
-		"out %4,%3   \n\t"\
-		"sbi %4,0    \n\t"	/* 2 clocks */ \
-					 \
-		"ldi %0,0    \n\t"\
-		"nop         \n\t"\
-		"out %4,%3   \n\t"\
-		"sbi %4,0    \n\t"	/* 2 clocks */ \
-					 \
-		"add %A2,%3  \n\t"\
-		"adc %B2,%0  \n\t"\
-		"out %4,%3   \n\t"\
-		"sbi %4,0    \n\t"	/* 2 clocks */ \
-					 \
-		"ld %0,%a2   \n\t"	/* 2 clocks */ \
-		"out %4,%3   \n\t"\
-		"sbi %4,0    \n\t"	/* 2 clocks */ \
-					 \
+		"out %4,%3    \n\t"\
+		"ldi %0,0     \n\t"\
+		"sbi %4,0     \n\t"	/* 2 clocks */ \
+					  \
+		"add %A2,%3   \n\t"\
+		"adc %B2,%0   \n\t"\
+		"out %4,%3    \n\t"\
+		"nop		  \n\t"\
+		"sbi %4,0     \n\t"	/* 2 clocks */ \
+					  \
+		"ld %0,%a2    \n\t"	/* 2 clocks */ \
+		"out %4,%3    \n\t"\
+		"nop		  \n\t"\
+		"sbi %4,0     \n\t"	/* 2 clocks */ \
+					  \
 		"ldd %1,%a2+1 \n\t"	/* 2 clocks */ \
-		"out %4,%3   \n\t"\
-		"sbi %4,0    \n\t"	/* 2 clocks */ \
-					 \
+		"out %4,%3    \n\t"\
+		"nop		  \n\t"\
+		"sbi %4,0     \n\t"	/* 2 clocks */ \
+					  \
 		: "=r" (val1), "=r" (val2), "=e" (tmp) 			\
 		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB))); }
 
@@ -167,12 +164,13 @@ void play_sound(const ulong samples_to_play)
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_5_BITS_AND_LOAD_VALUES();
+		PLAY_EMPTY_BIT();
+		PLAY_EMPTY_BIT();
+		PLAY_EMPTY_BIT();
+		PLAY_EMPTY_BIT();
+		PLAY_EMPTY_BIT();
 
-		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_BIT();
+		PLAY_EMPTY_4_BITS_AND_LOAD_VALUES();
 		PLAY_EMPTY_2_BITS_AND_LOOP_END();
 
 		if (even_counter2 == 0xff)
@@ -370,7 +368,7 @@ void SD_card_read_blocks(const uint nr_of_blocks)
 
 void loop(void)
 {
-	delay(4000);
+	delay(2000);
 	if (start_SD_card_read(0UL))
 		SD_card_read_blocks(2);
 
@@ -382,7 +380,7 @@ void loop(void)
 
 	cli();
 	while (1)
-		play_sound(2*48000);
+		play_sound(2*(F_CPU/(6*2*16)));
 
 	sei();
 	}
