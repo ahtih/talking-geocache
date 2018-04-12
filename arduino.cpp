@@ -5,6 +5,11 @@ typedef unsigned short ushort;
 typedef unsigned int uint;
 typedef unsigned long ulong;
 
+typedef signed char schar;
+typedef signed short sshort;
+typedef signed int sint;
+typedef signed long slong;
+
 #define LED_PIN 13
 
 /*		DATA	BCLK	LRCLK
@@ -21,6 +26,8 @@ ushort sound_data[128]={
 	0x1bff,0x9bff,0x9bff,0x9bff,0x9bff,0x5bff,0x5bff,0xdbff,0x3bff,0x3bff,0xbbff,0x7bff,0xfbff,0x07ff,0x47ff,0xc7ff,
 	0x27ff,0x67ff,0xe7ff,0x97ff,0x57ff,0x37ff,0x77ff,0xf7ff,0x8fff,0xcfff,0xafff,0xefff,0x9fff,0xdfff,0xbfff,0xffff,
 	};
+
+uchar translation_table[256*2];
 
 void play_sound(const ulong samples_to_play)
 {
@@ -165,22 +172,36 @@ void play_sound(const ulong samples_to_play)
 		: "=r" (val_hi), "=r" (val_lo), "=e" (tmp) 			\
 		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB))); }
 
-#define PLAY_EMPTY_2_BITS_AND_READ_VALUES_FROM_SD_CARD()	\
+#define PLAY_EMPTY_4_BITS_AND_READ_VALUES_FROM_SD_CARD()	\
+	{ ushort tmp; \
 	__asm__ __volatile__ (\
-		"in %1,%2     \n\t"\
+		"in %1,%3     \n\t"\
 		"ser %0       \n\t"\
-		"out %3,%4    \n\t"\
-		"out %2,%0    \n\t"\
-		"sbi %3,0     \n\t"	/* 2 clocks */ \
+		"out %4,%5    \n\t"\
+		"out %3,%0    \n\t"\
+		"nop          \n\t"\
+		"out %4,%0    \n\t"\
 					  \
-		"mov %0,%1    \n\t"\
-		"andi %0,1    \n\t"\
-		"out %3,%4    \n\t"\
-		"neg %0       \n\t"\
-		"sbi %3,0     \n\t"	/* 2 clocks */ \
+		"ldi %A2,lo8(translation_table+256) \n\t"\
+		"ldi %B2,hi8(translation_table+256) \n\t"\
+		"out %4,%5    \n\t"\
+		"add %A2,%1   \n\t"\
+		"adc %B2,%0   \n\t"\
+		"out %4,%0    \n\t"\
 					  \
-		: "=d" (val_hi), "=r" (val_lo) 	\
-		: "I" (_SFR_IO_ADDR(SPDR)), "I" (_SFR_IO_ADDR(PORTB)), "r" (even_counter0))
+		"ld %1,%a2    \n\t"	/* 2 clocks */ \
+		"out %4,%5    \n\t"\
+		"inc %B2      \n\t"\
+		"nop          \n\t"\
+		"out %4,%0    \n\t"\
+					  \
+		"ld %0,%a2    \n\t"	/* 2 clocks */ \
+		"out %4,%5    \n\t"\
+		"nop          \n\t"\
+		"sbi %4,0     \n\t"	/* 2 clocks */ \
+					  \
+		: "=d" (val_hi), "=r" (val_lo), "=e" (tmp) 	\
+		: "I" (_SFR_IO_ADDR(SPDR)), "I" (_SFR_IO_ADDR(PORTB)), "r" (even_counter0)); }
 
 
 	const ulong samples_to_playx2=samples_to_play << 1;
@@ -216,9 +237,7 @@ void play_sound(const ulong samples_to_play)
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
 
-		PLAY_EMPTY_2_BITS_AND_READ_VALUES_FROM_SD_CARD();
-		PLAY_EMPTY_BIT_AND_AMPLIFY2X();
-		PLAY_EMPTY_BIT_AND_AMPLIFY2X();
+		PLAY_EMPTY_4_BITS_AND_READ_VALUES_FROM_SD_CARD();
 		// PLAY_EMPTY_4_BITS_AND_LOAD_VALUES();
 
 		PLAY_EMPTY_2_BITS_AND_LOOP_END();
@@ -331,6 +350,17 @@ ushort bitreverse(ushort value)
 	return result;
 	}
 
+uchar bitreverse_byte(uchar value)
+{
+	uchar result=0;
+	{ for (uchar i=0;i < 8;i++) {
+		result<<=1;
+		result+=(value & 1);
+		value>>=1;
+		}}
+	return result;
+	}
+
 bool start_SD_card_read(const ulong block_idx)
 {		// Returns true on success
 
@@ -431,6 +461,12 @@ void loop(void)
 						);
 		}}
 		*/
+
+	{ for (ushort i=0;i < 256;i++) {
+		sshort value=((sshort)(schar)(uchar)bitreverse_byte(i)) << 4;	//!!!
+		translation_table[i    ]=bitreverse_byte(value & 0xff);
+		translation_table[i+256]=bitreverse_byte((value >> 8) & 0xff);
+		}}
 
 	delay(2000);
 	if (start_SD_card_read(0UL))
