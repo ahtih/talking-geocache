@@ -327,8 +327,8 @@ void setup(void)
 
 	SD_card_CS_high();
 
-	// Init SPI at Fosc/2 = 4MHz
-	SPCR=(1 << SPE) | (1 << MSTR) | (0 << SPR1) | (0 << SPR0);
+	// Init SPI at Fosc/16 = 500kHz
+	SPCR=(1 << SPE) | (1 << MSTR) | (0 << SPR1) | (1 << SPR0);
 	SPSR&=~(1 << SPI2X);
 
 		// Wait 74+ clock cycles with CS high
