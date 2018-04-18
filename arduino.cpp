@@ -29,7 +29,7 @@ ushort sound_data[128]={
 
 uchar translation_table[256*2];
 
-void play_sound(const ulong samples_to_play)
+ushort play_sound(const ulong samples_to_play)
 {
 #define PLAY_FIRST_2_BITS(reg)	\
 	__asm__ __volatile__ (\
@@ -203,6 +203,35 @@ void play_sound(const ulong samples_to_play)
 		: "=d" (val_hi), "=r" (val_lo), "=e" (tmp) 	\
 		: "I" (_SFR_IO_ADDR(SPDR)), "I" (_SFR_IO_ADDR(PORTB)), "r" (even_counter0)); }
 
+#define PLAY_EMPTY_4_BITS_AND_STORE_VALUES()	\
+	{ ushort tmp_ushort; uchar tmp; \
+	__asm__ __volatile__ (\
+		"ldi %A0,lo8(translation_table+254) \n\t"\
+		"ldi %B0,hi8(translation_table+254) \n\t"\
+		"out %3,%2 	  \n\t"\
+		"ser %1       \n\t"\
+		"nop          \n\t"\
+		"out %3,%1 	  \n\t"\
+					  \
+		"st %a0,%5	  \n\t" /* 2 clocks */ \
+		"out %3,%2 	  \n\t"\
+		"std %a0+1,%5 \n\t" /* 2 clocks */ \
+		"out %3,%1 	  \n\t"\
+					  \
+		"inc %B0      \n\t"\
+		"nop          \n\t"\
+		"out %3,%2 	  \n\t"\
+		"st %a0,%4	  \n\t" /* 2 clocks */ \
+		"out %3,%1 	  \n\t"\
+					  \
+		"std %a0+1,%4 \n\t" /* 2 clocks */ \
+		"out %3,%2 	  \n\t"\
+		"nop          \n\t"\
+		"nop          \n\t"\
+		"out %3,%1 	  \n\t"\
+					  \
+		: "=e" (tmp_ushort), "=r" (tmp)  \
+		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB)), "r" (val_hi), "r" (val_lo)); }
 
 	const ulong samples_to_playx2=samples_to_play << 1;
 	uchar even_counter0=(samples_to_playx2 & 0xff);
@@ -232,12 +261,14 @@ void play_sound(const ulong samples_to_play)
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_BIT();
-		PLAY_EMPTY_BIT();
 
 		PLAY_EMPTY_4_BITS_AND_READ_VALUES_FROM_SD_CARD();
+		PLAY_EMPTY_4_BITS_AND_STORE_VALUES()
+		// PLAY_EMPTY_BIT();
+		// PLAY_EMPTY_BIT();
+		// PLAY_EMPTY_BIT();
+		// PLAY_EMPTY_BIT();
+
 		// PLAY_EMPTY_4_BITS_AND_LOAD_VALUES();
 
 		PLAY_EMPTY_2_BITS_AND_LOOP_END();
@@ -245,6 +276,8 @@ void play_sound(const ulong samples_to_play)
 		if (even_counter2 == 0xff)
 			break;
 		}
+
+	return (((ushort)val_hi) << 8) + val_lo;
 	}
 
 #define AUDIO_LRCLK_PIN		PD7
@@ -463,18 +496,35 @@ void loop(void)
 		*/
 
 	{ for (ushort i=0;i < 256;i++) {
-		sshort value=((sshort)(schar)(uchar)bitreverse_byte(i)) << 4;	//!!!
+		sshort value=((sshort)(schar)(uchar)bitreverse_byte(i)) << 3;	//!!!
+		// if (i >= 0xfe)
+		//	value=0;
 		translation_table[i    ]=bitreverse_byte(value & 0xff);
 		translation_table[i+256]=bitreverse_byte((value >> 8) & 0xff);
 		}}
+
+	/*
+	Serial.println(translation_table[0x0fe],HEX);
+	Serial.println(translation_table[0x1fe],HEX);
+	Serial.println(translation_table[0x0ff],HEX);
+	Serial.println(translation_table[0x1ff],HEX);
+	*/
 
 	delay(2000);
 	if (start_SD_card_read(0UL))
 		SD_card_read_blocks(2);
 
+	ushort last_played_value=0;
 	cli();
-	while (1)
-		play_sound(2*(F_CPU/(6*2*16)));
+	while (1) {
+		last_played_value=play_sound(2*(F_CPU/(6*2*16)));
+		}
 	SD_card_CS_high();
 	sei();
+
+	Serial.println(last_played_value,HEX);	//!!!
+	Serial.println(translation_table[0x0fe],HEX);
+	Serial.println(translation_table[0x1fe],HEX);
+	Serial.println(translation_table[0x0ff],HEX);
+	Serial.println(translation_table[0x1ff],HEX);
 	}
