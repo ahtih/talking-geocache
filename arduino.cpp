@@ -10,7 +10,8 @@ typedef signed short sshort;
 typedef signed int sint;
 typedef signed long slong;
 
-#define LED_PIN 13
+#define ADC_MEASUREMENTS_PER_SEC	(F_CPU/(64*13))
+#define MIN_ADC_THRESHOLD			10
 
 /*		DATA	BCLK	LRCLK
 		PB1		PB0		PD7
@@ -369,6 +370,12 @@ void setup(void)
 	{ for (uchar i=0;i < 10;i++)
 		SPI_send_byte(0xff); }
 
+	ADCSRB=0;		// Select ADC Free Running mode
+	ADMUX=(1 << REFS1) + (1 << REFS0) + (1 << ADLAR) + 1;	// Select 1.1V ADC reference and ADC channel 1
+					// Select ADC clock = Fosc/64 = 125kHz and enable ADC
+	DIDR0=(1 << ADC1D);
+	ADCSRA=(1 << ADEN) + (1 << ADSC) + (1 << ADATE) + (1 << ADPS2) + (1 << ADPS1);
+
 	Serial.begin(9600);
 	}
 
@@ -485,8 +492,83 @@ void SD_card_read_blocks(const uint nr_of_blocks)
 	Serial.println("SD card read done");
 	}
 
+static volatile ushort next_byte_idx;
+static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
+static volatile ulong ADC_measurements_done;
+static volatile ushort knocks_done=0;
+static volatile uchar ADC_measurements_counter=0;
+static volatile uchar ADC_measurements_since_knock_shift8=0;
+
+ISR(ADC_vect)
+{
+	ADC_measurements_counter++;
+
+	if (!ADC_measurements_counter) {
+		ADC_threshold=((ADC_threshold * (ushort)(0.94f*256)) >> 8);
+		if (ADC_threshold < MIN_ADC_THRESHOLD)
+			ADC_threshold = MIN_ADC_THRESHOLD;
+
+		if (ADC_measurements_since_knock_shift8 < 0xffU)
+			ADC_measurements_since_knock_shift8++;
+		}
+
+	const uchar ADC_value=ADCH;
+	if (ADC_threshold < ADC_value) {
+		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC/(7*256))) {
+			knocks_done++;
+			ADC_measurements_since_knock_shift8=0;
+			}
+		ADC_threshold=ADC_value;
+		}
+
+	/*
+	if (next_byte_idx < 2*256)
+		translation_table[next_byte_idx++]=ADC_value;
+
+	ADC_measurements_done++;
+	*/
+	}
+
 void loop(void)
 {
+	ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
+
+	ushort knocks_printed=0;
+	uchar knocks_run_length=0;
+	while (1) {
+		const ushort delta=knocks_done - knocks_printed;
+		if (delta) {
+			Serial.println(delta);
+			knocks_printed+=delta;
+			knocks_run_length+=delta;
+			}
+
+		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC*2/256) &&
+																					knocks_run_length) {
+			Serial.print("Knocks: ");
+			Serial.println(knocks_run_length);
+			knocks_run_length=0;
+			}
+		}
+
+	while (1) {
+		next_byte_idx=0;
+		ADC_threshold=MIN_ADC_THRESHOLD;
+		ADC_measurements_done=0;
+
+		ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
+
+		while (ADC_measurements_done < 3*125000UL/13)
+			;
+
+		ADCSRA&=~(1 << ADIE);		// Disable ADC interrupt
+
+		Serial.println("-----------");
+
+		for (ushort i=0;i < next_byte_idx;i++)
+			Serial.println(translation_table[i]);
+		}
+
 	/*
 	{ for (uchar i=0;i < 128;i++) {
 		sound_data[i]=bitreverse(
