@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <avr/sleep.h>
 
 typedef unsigned char uchar;
 typedef unsigned short ushort;
@@ -370,11 +371,11 @@ void setup(void)
 	{ for (uchar i=0;i < 10;i++)
 		SPI_send_byte(0xff); }
 
-	ADCSRB=0;		// Select ADC Free Running mode
+	// ADCSRB=0;		// ADC Free Running mode; needed only when not using sleep mode
 	ADMUX=(1 << REFS1) + (1 << REFS0) + (1 << ADLAR) + 1;	// Select 1.1V ADC reference and ADC channel 1
 					// Select ADC clock = Fosc/64 = 125kHz and enable ADC
 	DIDR0=(1 << ADC1D);
-	ADCSRA=(1 << ADEN) + (1 << ADSC) + (1 << ADATE) + (1 << ADPS2) + (1 << ADPS1);
+	ADCSRA=(1 << ADEN) + (0 << ADSC) + (0 << ADATE) + (1 << ADPS2) + (1 << ADPS1);
 
 	Serial.begin(9600);
 	}
@@ -492,9 +493,10 @@ void SD_card_read_blocks(const uint nr_of_blocks)
 	Serial.println("SD card read done");
 	}
 
-static volatile ushort next_byte_idx;
+static volatile ushort next_byte_idx=0;
+static volatile uchar max_value=0;
+
 static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
-static volatile ulong ADC_measurements_done;
 static volatile ushort knocks_done=0;
 static volatile uchar ADC_measurements_counter=0;
 static volatile uchar ADC_measurements_since_knock_shift8=0;
@@ -522,11 +524,14 @@ ISR(ADC_vect)
 		}
 
 	/*
-	if (next_byte_idx < 2*256)
-		translation_table[next_byte_idx++]=ADC_value;
+	if (ADC_value > max_value) {
+		next_byte_idx=0;
+		max_value=ADC_value;
+		}
 
-	ADC_measurements_done++;
-	*/
+	if (!ADC_measurements_counter && next_byte_idx < 2*256)
+		translation_table[next_byte_idx++]=ADC_value;
+		*/
 	}
 
 void loop(void)
@@ -536,37 +541,31 @@ void loop(void)
 	ushort knocks_printed=0;
 	uchar knocks_run_length=0;
 	while (1) {
+		SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
+		sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
+		// After ADC interrupt, execution resumes from this point
+		SMCR=0;
+
 		const ushort delta=knocks_done - knocks_printed;
 		if (delta) {
-			Serial.println(delta);
+			// Serial.println(delta);
 			knocks_printed+=delta;
 			knocks_run_length+=delta;
 			}
 
 		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC*2/256) &&
 																					knocks_run_length) {
+			/*
+			{ for (ushort i=0;i < next_byte_idx;i++)
+				Serial.println(translation_table[i]); }
+			next_byte_idx=max_value=0;
+			*/
+
 			Serial.print("Knocks: ");
 			Serial.println(knocks_run_length);
+			Serial.flush();
 			knocks_run_length=0;
 			}
-		}
-
-	while (1) {
-		next_byte_idx=0;
-		ADC_threshold=MIN_ADC_THRESHOLD;
-		ADC_measurements_done=0;
-
-		ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
-
-		while (ADC_measurements_done < 3*125000UL/13)
-			;
-
-		ADCSRA&=~(1 << ADIE);		// Disable ADC interrupt
-
-		Serial.println("-----------");
-
-		for (ushort i=0;i < next_byte_idx;i++)
-			Serial.println(translation_table[i]);
 		}
 
 	/*
