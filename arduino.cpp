@@ -11,6 +11,8 @@ typedef signed short sshort;
 typedef signed int sint;
 typedef signed long slong;
 
+#define lenof(t)	(sizeof(t)/sizeof(*t))
+
 #define ADC_MEASUREMENTS_PER_SEC	(F_CPU/(64*13))
 #define MIN_ADC_THRESHOLD			10
 
@@ -497,9 +499,16 @@ static volatile ushort next_byte_idx=0;
 static volatile uchar max_value=0;
 
 static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
-static volatile ushort knocks_done=0;
 static volatile uchar ADC_measurements_counter=0;
 static volatile uchar ADC_measurements_since_knock_shift8=0;
+
+struct knock_t {
+	uchar max_ADC_value;
+	uchar ADC_measurements_since_last_knock_shift8;
+	};
+
+static knock_t knocks_ringbuffer[32];
+static uchar next_knock_idx=0;
 
 ISR(ADC_vect)
 {
@@ -517,11 +526,19 @@ ISR(ADC_vect)
 	const uchar ADC_value=ADCH;
 	if (ADC_threshold < ADC_value) {
 		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC/(7*256))) {
-			knocks_done++;
+			knocks_ringbuffer[next_knock_idx].max_ADC_value=ADC_value;
+			knocks_ringbuffer[next_knock_idx].ADC_measurements_since_last_knock_shift8=
+																	ADC_measurements_since_knock_shift8;
+			next_knock_idx=(next_knock_idx + 1) & (lenof(knocks_ringbuffer)-1);
 			ADC_measurements_since_knock_shift8=0;
 			}
 		ADC_threshold=ADC_value;
 		}
+
+	{ uchar * const p=&knocks_ringbuffer[(next_knock_idx + lenof(knocks_ringbuffer) - 1) &
+																(lenof(knocks_ringbuffer)-1)].max_ADC_value;
+	if (*p < ADC_value)
+		*p = ADC_value; }
 
 	/*
 	if (ADC_value > max_value) {
@@ -538,33 +555,46 @@ void loop(void)
 {
 	ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
 
-	ushort knocks_printed=0;
-	uchar knocks_run_length=0;
+	uchar last_knock_idx=next_knock_idx;
 	while (1) {
 		SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
 		sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
 		// After ADC interrupt, execution resumes from this point
 		SMCR=0;
 
+		/*
 		const ushort delta=knocks_done - knocks_printed;
 		if (delta) {
 			// Serial.println(delta);
 			knocks_printed+=delta;
 			knocks_run_length+=delta;
 			}
+			*/
 
 		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC*2/256) &&
-																					knocks_run_length) {
+																		last_knock_idx != next_knock_idx) {
 			/*
 			{ for (ushort i=0;i < next_byte_idx;i++)
 				Serial.println(translation_table[i]); }
 			next_byte_idx=max_value=0;
 			*/
 
+			const uchar nr_of_knocks=(next_knock_idx + lenof(knocks_ringbuffer) - last_knock_idx) &
+																			(lenof(knocks_ringbuffer)-1);
 			Serial.print("Knocks: ");
-			Serial.println(knocks_run_length);
+			Serial.print(nr_of_knocks);
+			Serial.print("\n");
+
+			{ for (uchar i=last_knock_idx;i != next_knock_idx;i=(i + 1) & (lenof(knocks_ringbuffer)-1)) {
+				Serial.print("   ");
+				Serial.print(knocks_ringbuffer[i].ADC_measurements_since_last_knock_shift8);
+				Serial.print(" ");
+				Serial.print(knocks_ringbuffer[i].max_ADC_value);
+				Serial.print("\n");
+				}}
+
 			Serial.flush();
-			knocks_run_length=0;
+			last_knock_idx=next_knock_idx;
 			}
 		}
 
