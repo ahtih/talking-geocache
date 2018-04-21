@@ -10,12 +10,6 @@ def bitreverse(value,nr_of_bits):
 		value>>=1
 	return result
 
-wave_file=wave.open(sys.argv[1],'r')
-output_file=open(sys.argv[2],'wb')
-
-nr_of_frames=wave_file.getnframes()
-audio_data_string=wave_file.readframes(nr_of_frames)
-
 def value_error(byte1,byte2):
 	if byte1 >= 128:
 		byte1-=256
@@ -23,19 +17,66 @@ def value_error(byte1,byte2):
 		byte2-=256
 	return abs(byte1 - byte2)
 
+def translate_value_to_byte(value):
+	if value:
+		value=((int(127 + 20*math.log(abs(value) / float(2**15))) * (+1 if value >= 0 else -1)) & 255)
+	else:
+		value=0
+
+	# value=((value >> 8) & 255)
+
+	if value >= 128+2:
+		value-=2
+
+	return value
+
+if len(sys.argv) < 1+2:
+	translation_table=[[0,0] for i in range(256)]
+	for value in range(-(2**15),(2**15)+1):
+		byte=translate_value_to_byte(value)
+		translation_table[byte][0]+=float(value)
+		translation_table[byte][1]+=1
+
+	for byte in range(len(translation_table)):
+		translation_table[byte]=int(translation_table[byte][0] / float(max(1,translation_table[byte][1])))
+		print '%02x %+d' % (byte,translation_table[byte])
+
+	for byte,value in enumerate(translation_table):
+		column_nr=((byte + 1) % 16)
+		if column_nr == 1:
+			print '\t',
+		print '%3d,' % (value & 255,),
+		if not column_nr:
+			print
+
+	print
+
+	for byte,value in enumerate(translation_table):
+		column_nr=((byte + 1) % 16)
+		if column_nr == 1:
+			print '\t',
+		print '%3d,' % ((value >> 8) & 255,),
+		if not column_nr:
+			print
+
+	exit(0)
+
+wave_file=wave.open(sys.argv[1],'r')
+output_file=open(sys.argv[2],'wb')
+
+nr_of_frames=wave_file.getnframes()
+audio_data_string=wave_file.readframes(nr_of_frames)
+
 unmodified_block_str=''
 for i in range(nr_of_frames):
 	value=ord(audio_data_string[i*2]) + 256*ord(audio_data_string[i*2+1])
 	if value >= 2**15:
 		value-=2**16
-	value>>=8
 
-	# value=((20 if (i % 128) >= 64 else -20) if (i % (2*41667)) < 41667 else 0)
-	# value=int(40 * math.sin((i % 128) * 2.0 * math.pi / 128.0))
+	# value=((20 if (i % 128) >= 64 else -20) if (i % (2*41667)) < 41667 else 0) * 256
+	# value=int(40 * math.sin((i % 128) * 2.0 * math.pi / 128.0)) * 256
 
-	output_value=(value & 255)
-	if output_value >= 128+2:
-		output_value-=2
+	output_value=translate_value_to_byte(value)
 
 	# print '%+d %02x' % (value,output_value)
 
