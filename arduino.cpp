@@ -595,9 +595,10 @@ void loop(void)
 		*/
 
 	{ for (ushort i=0;i < 256;i++) {
-		sshort value=((sshort)(schar)(uchar)bitreverse_byte(i)) << 3;	//!!!
-		// if (i >= 0xfe)
-		//	value=0;
+		sshort value=(sshort)(schar)(uchar)i;
+		if (value < 0)
+			value+=2;
+		value<<=3;
 		translation_table[i    ]=bitreverse_byte(value & 0xff);
 		translation_table[i+256]=bitreverse_byte((value >> 8) & 0xff);
 		}}
