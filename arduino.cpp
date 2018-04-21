@@ -22,6 +22,7 @@ typedef signed long slong;
 		PB1		PB0		PD7
 	*/
 
+/*
 ushort sound_data[128]={
 	0x0000,0x8000,0xc000,0xa000,0xe000,0x9000,0xd000,0xb000,0xf000,0x8800,0x4800,0x2800,0x6800,0xe800,0x9800,0x5800,
 	0x3800,0xb800,0x7800,0x0400,0x8400,0x4400,0xc400,0x2400,0x2400,0xa400,0x6400,0x6400,0xe400,0xe400,0xe400,0xe400,
@@ -32,6 +33,7 @@ ushort sound_data[128]={
 	0x1bff,0x9bff,0x9bff,0x9bff,0x9bff,0x5bff,0x5bff,0xdbff,0x3bff,0x3bff,0xbbff,0x7bff,0xfbff,0x07ff,0x47ff,0xc7ff,
 	0x27ff,0x67ff,0xe7ff,0x97ff,0x57ff,0x37ff,0x77ff,0xf7ff,0x8fff,0xcfff,0xafff,0xefff,0x9fff,0xdfff,0xbfff,0xffff,
 	};
+	*/
 
 uchar translation_table[256*2]={
 	  0,   4,  18,  10,  32,  35,  39,  42,  45,  55,  75,  63,  67,  92,  97,  86,
@@ -582,17 +584,7 @@ struct interaction_state_t {
 	uchar next_state_idx_by_knocks[10-1];
 	};
 
-static const interaction_state_t interaction_states[]={
-	{(ushort)(  0.0f*44100/512),(ushort)(2.325f*44100/512),{1,2,3,4,4,4,4,4,4}},	// koputa 3x
-	{(ushort)(6.408f*44100/512),(ushort)((10.917f-6.408f)*44100/512),
-									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 1x
-	{(ushort)(15.893f*44100/512),(ushort)((18.091f-15.893f)*44100/512),
-									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 2x
-	{(ushort)(22.387f*44100/512),(ushort)((25.364f-22.387f)*44100/512),
-									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 3x
-	{(ushort)(29.320f*44100/512),(ushort)((34.098f-29.320f)*44100/512),
-									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 4x
-	};
+static interaction_state_t interaction_states[40];
 
 ISR(ADC_vect)
 {
@@ -648,6 +640,26 @@ void play_sound_from_SD_card(const ulong block_idx,const ulong nr_of_samples)
 	sei();
 	}
 
+bool read_interaction_script(void)
+{
+	if (!start_SD_card_read(0UL))
+		return false;
+
+	{ for (ushort i=0;i < 512 && i < sizeof(interaction_states);i++)
+		((uchar *)&interaction_states)[i]=SPI_receive_byte(); }
+
+		//!!! Add support for scripts larger than one block
+
+	SD_card_CS_high();
+
+	Serial.print("Interaction script reading done\n");
+	Serial.flush();
+
+	//!!! Add some kind of data integrity check
+
+	return true;
+	}
+
 void loop(void)
 {
 	/*
@@ -675,6 +687,9 @@ void loop(void)
 	Serial.println(translation_table[0x0ff],HEX);
 	Serial.println(translation_table[0x1ff],HEX);
 	*/
+
+	while (!read_interaction_script())
+		delay(500);		// Use low-power sleep?
 
 	ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
 
