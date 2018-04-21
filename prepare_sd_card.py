@@ -92,7 +92,7 @@ def process_audio_file(fname):
 		if len(unmodified_block_str) >= 512:
 			best_crc_error=1e6
 
-			for idx1 in range(len(unmodified_block_str)-1-2):
+			for idx1 in range(len(unmodified_block_str)-1-2-1,-1,-1):
 				if not best_crc_error:
 					break
 				block_str1=unmodified_block_str[:idx1] + \
