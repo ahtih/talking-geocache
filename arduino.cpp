@@ -13,6 +13,8 @@ typedef signed long slong;
 
 #define lenof(t)	(sizeof(t)/sizeof(*t))
 
+#define AUDIO_SAMPLE_RATE			(F_CPU/(6*2*16))
+
 #define ADC_MEASUREMENTS_PER_SEC	(F_CPU/(64*13))
 #define MIN_ADC_THRESHOLD			10
 
@@ -551,53 +553,21 @@ ISR(ADC_vect)
 		*/
 	}
 
+void play_sound_from_SD_card(const ulong block_idx,const ulong nr_of_samples)
+{
+	if (!start_SD_card_read(block_idx))
+		return;
+
+	Serial.flush();
+
+	cli();
+	play_sound(nr_of_samples);
+	SD_card_CS_high();
+	sei();
+	}
+
 void loop(void)
 {
-	ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
-
-	uchar last_knock_idx=next_knock_idx;
-	while (1) {
-		SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
-		sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
-		// After ADC interrupt, execution resumes from this point
-		SMCR=0;
-
-		/*
-		const ushort delta=knocks_done - knocks_printed;
-		if (delta) {
-			// Serial.println(delta);
-			knocks_printed+=delta;
-			knocks_run_length+=delta;
-			}
-			*/
-
-		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC*2/256) &&
-																		last_knock_idx != next_knock_idx) {
-			/*
-			{ for (ushort i=0;i < next_byte_idx;i++)
-				Serial.println(translation_table[i]); }
-			next_byte_idx=max_value=0;
-			*/
-
-			const uchar nr_of_knocks=(next_knock_idx + lenof(knocks_ringbuffer) - last_knock_idx) &
-																			(lenof(knocks_ringbuffer)-1);
-			Serial.print("Knocks: ");
-			Serial.print(nr_of_knocks);
-			Serial.print("\n");
-
-			{ for (uchar i=last_knock_idx;i != next_knock_idx;i=(i + 1) & (lenof(knocks_ringbuffer)-1)) {
-				Serial.print("   ");
-				Serial.print(knocks_ringbuffer[i].ADC_measurements_since_last_knock_shift8);
-				Serial.print(" ");
-				Serial.print(knocks_ringbuffer[i].max_ADC_value);
-				Serial.print("\n");
-				}}
-
-			Serial.flush();
-			last_knock_idx=next_knock_idx;
-			}
-		}
-
 	/*
 	{ for (uchar i=0;i < 128;i++) {
 		sound_data[i]=bitreverse(
@@ -621,15 +591,66 @@ void loop(void)
 	Serial.println(translation_table[0x1ff],HEX);
 	*/
 
+	ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
+
+	uchar last_knock_idx=next_knock_idx;
+	while (1) {
+		SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
+		sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
+		// After ADC interrupt, execution resumes from this point
+		SMCR=0;
+
+		/*
+		const ushort delta=knocks_done - knocks_printed;
+		if (delta) {
+			// Serial.println(delta);
+			knocks_printed+=delta;
+			knocks_run_length+=delta;
+			}
+			*/
+
+		const uchar _next_knock_idx=next_knock_idx;
+		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC*2/256) &&
+																		last_knock_idx != _next_knock_idx) {
+			/*
+			{ for (ushort i=0;i < next_byte_idx;i++)
+				Serial.println(translation_table[i]); }
+			next_byte_idx=max_value=0;
+			*/
+
+			const uchar nr_of_knocks=(_next_knock_idx + lenof(knocks_ringbuffer) - last_knock_idx) &
+																			(lenof(knocks_ringbuffer)-1);
+			Serial.print("Knocks: ");
+			Serial.print(nr_of_knocks);
+			Serial.print("\n");
+
+			{ for (uchar i=last_knock_idx;i != _next_knock_idx;i=(i + 1) & (lenof(knocks_ringbuffer)-1)) {
+				Serial.print("   ");
+				Serial.print(knocks_ringbuffer[i].ADC_measurements_since_last_knock_shift8);
+				Serial.print(" ");
+				Serial.print(knocks_ringbuffer[i].max_ADC_value);
+				Serial.print("\n");
+				}}
+
+			Serial.flush();
+
+			play_sound_from_SD_card((AUDIO_SAMPLE_RATE/512) * (nr_of_knocks - 1),3*AUDIO_SAMPLE_RATE);
+
+			Serial.print("Audio playing finished\n");
+			Serial.flush();
+
+			last_knock_idx=_next_knock_idx;
+			}
+		}
+
 	delay(2000);
 	if (start_SD_card_read(0UL))
 		SD_card_read_blocks(2);
 
 	ushort last_played_value=0;
 	cli();
-	while (1) {
-		last_played_value=play_sound(2*(F_CPU/(6*2*16)));
-		}
+	while (1)
+		last_played_value=play_sound(2*AUDIO_SAMPLE_RATE);
 	SD_card_CS_high();
 	sei();
 
