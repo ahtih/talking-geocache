@@ -30,17 +30,17 @@ def translate_value_to_byte(value):
 
 	return value
 
+translation_table=[[0,0] for i in range(256)]
+for value in range(-(2**15),(2**15)+1):
+	byte=translate_value_to_byte(value)
+	translation_table[byte][0]+=float(value)
+	translation_table[byte][1]+=1
+
+for byte in range(len(translation_table)):
+	translation_table[byte]=int(translation_table[byte][0] / float(max(1,translation_table[byte][1])))
+	# print '%02x %+d' % (byte,translation_table[byte])
+
 if len(sys.argv) < 1+2:
-	translation_table=[[0,0] for i in range(256)]
-	for value in range(-(2**15),(2**15)+1):
-		byte=translate_value_to_byte(value)
-		translation_table[byte][0]+=float(value)
-		translation_table[byte][1]+=1
-
-	for byte in range(len(translation_table)):
-		translation_table[byte]=int(translation_table[byte][0] / float(max(1,translation_table[byte][1])))
-		print '%02x %+d' % (byte,translation_table[byte])
-
 	for byte,value in enumerate(translation_table):
 		column_nr=((byte + 1) % 16)
 		if column_nr == 1:
@@ -68,6 +68,8 @@ nr_of_frames=wave_file.getnframes()
 audio_data_string=wave_file.readframes(nr_of_frames)
 
 unmodified_block_str=''
+residual_delta=0
+
 for i in range(nr_of_frames):
 	value=ord(audio_data_string[i*2]) + 256*ord(audio_data_string[i*2+1])
 	if value >= 2**15:
@@ -76,7 +78,9 @@ for i in range(nr_of_frames):
 	# value=((20 if (i % 128) >= 64 else -20) if (i % (2*41667)) < 41667 else 0) * 256
 	# value=int(40 * math.sin((i % 128) * 2.0 * math.pi / 128.0)) * 256
 
+	value+=residual_delta
 	output_value=translate_value_to_byte(value)
+	residual_delta=translation_table[output_value] - value
 
 	# print '%+d %02x' % (value,output_value)
 
