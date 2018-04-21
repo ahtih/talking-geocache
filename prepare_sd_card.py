@@ -126,7 +126,7 @@ def process_audio_file(fname):
 
 	wave_file.close()
 
-	return ((len(output_audio_data) - nr_of_samples) / 512,nr_of_samples)
+	return ((len(output_audio_data) - nr_of_samples) / 512,nr_of_samples / 512)
 
 interaction_states=[]
 
@@ -154,14 +154,14 @@ for line in open(sys.argv[1],'r'):
 			exit(1)
 		interaction_states[-1].append(fields[0])
 
-script_blocks=(len(interaction_states) * (4+4+9) + 512-1) / 512
+script_blocks=(len(interaction_states) * (2+2+9) + 512-1) / 512
 output_audio_data=''
 output_script_data=''
 
 for state in interaction_states:
 	audio_params=process_audio_file(state[1])
 
-	state_output_data=struct.pack('<II',audio_params[0] + script_blocks,audio_params[1])
+	state_output_data=struct.pack('<HH',audio_params[0] + script_blocks,audio_params[1])
 
 	next_state_idx=255
 	for i in range(9):

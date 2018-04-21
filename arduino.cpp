@@ -577,20 +577,20 @@ static knock_t knocks_ringbuffer[32];
 static uchar next_knock_idx=0;
 
 struct interaction_state_t {
-	ulong audio_block_idx;
-	ulong audio_nr_of_samples;
+	ushort audio_block_idx;
+	ushort audio_nr_of_blocks;
 	uchar next_state_idx_by_knocks[10-1];
 	};
 
 static const interaction_state_t interaction_states[]={
-	{(ulong)(  0.0f*44100/512),(ulong)(2.325f*44100),{1,2,3,4,4,4,4,4,4}},	// koputa 3x
-	{(ulong)(6.408f*44100/512),(ulong)((10.917f-6.408f)*44100),
+	{(ushort)(  0.0f*44100/512),(ushort)(2.325f*44100/512),{1,2,3,4,4,4,4,4,4}},	// koputa 3x
+	{(ushort)(6.408f*44100/512),(ushort)((10.917f-6.408f)*44100/512),
 									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 1x
-	{(ulong)(15.893f*44100/512),(ulong)((18.091f-15.893f)*44100),
+	{(ushort)(15.893f*44100/512),(ushort)((18.091f-15.893f)*44100/512),
 									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 2x
-	{(ulong)(22.387f*44100/512),(ulong)((25.364f-22.387f)*44100),
+	{(ushort)(22.387f*44100/512),(ushort)((25.364f-22.387f)*44100/512),
 									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 3x
-	{(ulong)(29.320f*44100/512),(ulong)((34.098f-29.320f)*44100),
+	{(ushort)(29.320f*44100/512),(ushort)((34.098f-29.320f)*44100/512),
 									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 4x
 	};
 
@@ -732,7 +732,7 @@ void loop(void)
 			Serial.flush();
 
 			play_sound_from_SD_card(interaction_states[cur_interaction_state_idx].audio_block_idx,
-									interaction_states[cur_interaction_state_idx].audio_nr_of_samples);
+									interaction_states[cur_interaction_state_idx].audio_nr_of_blocks * 512UL);
 
 			Serial.print("Audio playing finished\n");
 			/*
