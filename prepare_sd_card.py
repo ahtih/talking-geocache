@@ -20,10 +20,12 @@ for i in range(nr_of_frames):
 	value=ord(audio_data_string[i*2]) + 256*ord(audio_data_string[i*2+1])
 	if value >= 2**15:
 		value-=2**16
+	value>>=8
 
-	output_value=((value >> 8) & 255)
-	# output_value=((20 if (i % 128) >= 64 else -20) if (i % (2*41667)) < 41667 else 0)
-	# output_value=int(40 * math.sin((i % 128) * 2.0 * math.pi / 128.0))
+	# value=((20 if (i % 128) >= 64 else -20) if (i % (2*41667)) < 41667 else 0)
+	# value=int(40 * math.sin((i % 128) * 2.0 * math.pi / 128.0))
+
+	output_value=(value & 255)
 	if output_value >= 128+2:
 		output_value-=2
 
