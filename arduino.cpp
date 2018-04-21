@@ -512,6 +512,24 @@ struct knock_t {
 static knock_t knocks_ringbuffer[32];
 static uchar next_knock_idx=0;
 
+struct interaction_state_t {
+	ulong audio_block_idx;
+	ulong audio_nr_of_samples;
+	uchar next_state_idx_by_knocks[10-1];
+	};
+
+static const interaction_state_t interaction_states[]={
+	{(ulong)(  0.0f*44100/512),(ulong)(2.325f*44100),{1,2,3,4,4,4,4,4,4}},	// koputa 3x
+	{(ulong)(6.408f*44100/512),(ulong)((10.917f-6.408f)*44100),
+									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 1x
+	{(ulong)(15.893f*44100/512),(ulong)((18.091f-15.893f)*44100),
+									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 2x
+	{(ulong)(22.387f*44100/512),(ulong)((25.364f-22.387f)*44100),
+									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 3x
+	{(ulong)(29.320f*44100/512),(ulong)((34.098f-29.320f)*44100),
+									{0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff}},	// koputasid 4x
+	};
+
 ISR(ADC_vect)
 {
 	ADC_measurements_counter++;
@@ -593,6 +611,8 @@ void loop(void)
 
 	ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
 
+	uchar cur_interaction_state_idx=0xff;
+
 	uchar last_knock_idx=next_knock_idx;
 	while (1) {
 		SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
@@ -620,8 +640,18 @@ void loop(void)
 
 			const uchar nr_of_knocks=(_next_knock_idx + lenof(knocks_ringbuffer) - last_knock_idx) &
 																			(lenof(knocks_ringbuffer)-1);
+			const uchar prev_state_idx=cur_interaction_state_idx;
+
+			if (cur_interaction_state_idx == 0xff)
+				cur_interaction_state_idx=0;
+			else
+				cur_interaction_state_idx=interaction_states[cur_interaction_state_idx].
+															next_state_idx_by_knocks[min(nr_of_knocks,10)-1];
+
 			Serial.print("Knocks: ");
 			Serial.print(nr_of_knocks);
+			Serial.print("   new state: ");
+			Serial.print(cur_interaction_state_idx);
 			Serial.print("\n");
 
 			{ for (uchar i=last_knock_idx;i != _next_knock_idx;i=(i + 1) & (lenof(knocks_ringbuffer)-1)) {
@@ -634,10 +664,14 @@ void loop(void)
 
 			Serial.flush();
 
-			play_sound_from_SD_card((AUDIO_SAMPLE_RATE/512) * (nr_of_knocks - 1),3*AUDIO_SAMPLE_RATE);
+			play_sound_from_SD_card(interaction_states[cur_interaction_state_idx].audio_block_idx,
+									interaction_states[cur_interaction_state_idx].audio_nr_of_samples);
 
 			Serial.print("Audio playing finished\n");
 			Serial.flush();
+
+			if (interaction_states[cur_interaction_state_idx].next_state_idx_by_knocks[0] == 0xff)
+				cur_interaction_state_idx=prev_state_idx;
 
 			last_knock_idx=_next_knock_idx;
 			}
