@@ -178,6 +178,34 @@ ushort play_sound(const ulong samples_to_play)
 		: "=r" (val_hi), "=r" (val_lo), "=e" (tmp) 			\
 		: "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB))); }
 
+#define PLAY_EMPTY_4_BITS_AND_RECORD_VALUES()	\
+	{ ushort tmp; uchar tmp_byte; \
+	__asm__ __volatile__ (\
+		"ldi %A0,lo8(sound_data)   \n\t"\
+		"ldi %B0,hi8(sound_data)   \n\t"\
+		"out %5,%4    \n\t"\
+		"clr %1       \n\t"\
+		"sbi %5,0     \n\t"	/* 2 clocks */ \
+					  \
+		"add %A0,%4   \n\t"\
+		"adc %B0,%1   \n\t"\
+		"out %5,%4    \n\t"\
+		"nop		  \n\t"\
+		"sbi %5,0     \n\t"	/* 2 clocks */ \
+					  \
+		"st %a0,%2    \n\t"	/* 2 clocks */ \
+		"out %5,%4    \n\t"\
+		"nop		  \n\t"\
+		"sbi %5,0     \n\t"	/* 2 clocks */ \
+					  \
+		"std %a0+1,%3 \n\t"	/* 2 clocks */ \
+		"out %5,%4    \n\t"\
+		"nop		  \n\t"\
+		"sbi %5,0     \n\t"	/* 2 clocks */ \
+					  \
+		: "=e" (tmp), "=r" (tmp_byte) \
+		: "r" (val_hi), "r" (val_lo), "r" (even_counter0), "I" (_SFR_IO_ADDR(PORTB))); }
+
 #define PLAY_EMPTY_4_BITS_AND_READ_VALUES_FROM_SD_CARD()	\
 	{ ushort tmp; \
 	__asm__ __volatile__ (\
@@ -263,13 +291,15 @@ ushort play_sound(const ulong samples_to_play)
 		PLAY_NEXT_BIT(val_lo);
 		PLAY_LAST_3_BITS_SET_LRCLK1(val_lo);
 
+		PLAY_EMPTY_4_BITS_AND_READ_VALUES_FROM_SD_CARD();
+		PLAY_EMPTY_4_BITS_AND_STORE_VALUES();
+
+		// PLAY_EMPTY_4_BITS_AND_RECORD_VALUES();
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
 		PLAY_EMPTY_BIT();
 
-		PLAY_EMPTY_4_BITS_AND_READ_VALUES_FROM_SD_CARD();
-		PLAY_EMPTY_4_BITS_AND_STORE_VALUES()
 		// PLAY_EMPTY_BIT();
 		// PLAY_EMPTY_BIT();
 		// PLAY_EMPTY_BIT();
@@ -669,6 +699,12 @@ void loop(void)
 									interaction_states[cur_interaction_state_idx].audio_nr_of_samples);
 
 			Serial.print("Audio playing finished\n");
+			/*
+			{ for (uchar i=0;i < 128;i++) {
+				Serial.print((sshort)bitreverse(sound_data[i]));
+				Serial.print("\n");
+				}}
+			*/
 			Serial.flush();
 
 			if (interaction_states[cur_interaction_state_idx].next_state_idx_by_knocks[0] == 0xff)
