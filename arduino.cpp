@@ -900,7 +900,7 @@ void loop(void)
 			last_knock_idx=_next_knock_idx;
 			}
 		else if (cur_interaction_state_idx != 0xff &&
-						ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*90/256)) {
+						ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*90UL/256)) {
 			Serial.print("Session timeout in state ");
 			Serial.print(cur_interaction_state_idx);
 			Serial.print("\n");
