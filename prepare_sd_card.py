@@ -41,23 +41,16 @@ for byte in range(len(translation_table)):
 	# print '%02x %+d' % (byte,translation_table[byte])
 
 if len(sys.argv) < 1+2:
-	for byte,value in enumerate(translation_table):
-		column_nr=((byte + 1) % 16)
-		if column_nr == 1:
-			print '\t',
-		print '%3d,' % (value & 255,),
-		if not column_nr:
-			print
+	for shift_bits in (0,8):
+		for byte,value in enumerate(translation_table):
+			column_nr=((byte + 1) % 16)
+			if column_nr == 1:
+				print '\t',
+			print '0x%02x,' % (bitreverse(value >> (4 + shift_bits) & 255,8),),
+			if not column_nr:
+				print
 
-	print
-
-	for byte,value in enumerate(translation_table):
-		column_nr=((byte + 1) % 16)
-		if column_nr == 1:
-			print '\t',
-		print '%3d,' % ((value >> 8) & 255,),
-		if not column_nr:
-			print
+		print
 
 	exit(0)
 
