@@ -765,6 +765,19 @@ bool read_interaction_script(void)
 	Serial.print("Interaction script reading done\n");
 	Serial.flush();
 
+	{ for (ushort j=0;j < 10;j++) {
+		Serial.print(interaction_states[j].audio_block_idx,HEX);
+		Serial.print(" ");
+		Serial.print(interaction_states[j].audio_nr_of_blocks,HEX);
+
+		{ for (ushort i=0;i < lenof(interaction_states[0].next_state_idx_by_knocks);i++) {
+			Serial.print(" ");
+			Serial.print(interaction_states[j].next_state_idx_by_knocks[i]);
+			}}
+		Serial.print("\n");
+		}}
+	Serial.flush();
+
 	//!!! Add some kind of data integrity check
 
 	return true;
