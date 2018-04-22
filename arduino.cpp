@@ -886,6 +886,8 @@ void loop(void)
 		if (log_interval_nr != last_written_log_interval_nr) {
 			write_status_to_SD_card(0x01);
 			Serial.flush();
+
+			last_written_log_interval_nr=log_interval_nr;
 			}
 		}
 
