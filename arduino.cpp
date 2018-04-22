@@ -18,9 +18,45 @@ typedef signed long slong;
 #define ADC_MEASUREMENTS_PER_SEC	(F_CPU/(64*13))
 #define MIN_ADC_THRESHOLD			10
 
+#define MIN_SD_CARD_LOG_BLOCK_IDX	( 200UL*1024UL*(1024/512))
+#define MAX_SD_CARD_LOG_BLOCK_IDX	(1000UL*1024UL*(1024/512))
+
+#define MAX_INTERACTION_STATES		40
+
 /*		DATA	BCLK	LRCLK
 		PB1		PB0		PD7
 	*/
+
+static volatile ushort next_byte_idx=0;
+static volatile uchar max_value=0;
+
+static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
+static volatile uchar ADC_measurements_counter=0;
+static volatile uchar ADC_measurements_since_knock_shift8=0;
+
+struct knock_t {
+	uchar max_ADC_value;
+	uchar ADC_measurements_since_last_knock_shift8;
+	};
+
+static knock_t knocks_ringbuffer[32];
+static uchar next_knock_idx=0;
+
+ulong ADC_random_crc=0xffffffffUL;
+
+struct interaction_state_t {
+	ushort audio_block_idx;
+	ushort audio_nr_of_blocks;
+	uchar next_state_idx_by_knocks[10-1];
+	};
+
+static interaction_state_t interaction_states[MAX_INTERACTION_STATES];
+static ushort state_entering_counts[MAX_INTERACTION_STATES];
+static uchar cur_session_log[100];
+static uchar cur_session_log_idx=0;
+
+static ulong log_writing_SD_card_block_idx=0UL;
+static ushort last_written_log_interval_nr=0;
 
 /*
 ushort sound_data[128]={
@@ -571,13 +607,23 @@ void SD_card_read_blocks(const uint nr_of_blocks)
 	Serial.println("SD card read done");
 	}
 
-bool write_status_to_SD_card(const ulong block_idx,const uchar reason_code)
+bool write_status_to_SD_card(const uchar reason_code)
 {		// Returns true on success
+
+	if (log_writing_SD_card_block_idx < MIN_SD_CARD_LOG_BLOCK_IDX)
+		log_writing_SD_card_block_idx=MIN_SD_CARD_LOG_BLOCK_IDX + ADC_random_crc %
+												(MAX_SD_CARD_LOG_BLOCK_IDX - MIN_SD_CARD_LOG_BLOCK_IDX);
+	else
+		log_writing_SD_card_block_idx++;
+
+	Serial.print("Writing status to SD card block ");
+	Serial.print(log_writing_SD_card_block_idx);
+	Serial.print("\n");
 
 	if (!init_SD_card())
 		return false;
 
-	if (SD_card_command(24,block_idx)) {
+	if (SD_card_command(24,log_writing_SD_card_block_idx)) {
 		SD_card_CS_high();
 		Serial.println("CMD24 returned error");
 		return false;
@@ -596,12 +642,22 @@ bool write_status_to_SD_card(const ulong block_idx,const uchar reason_code)
 
 	SPI_send_byte(reason_code);
 
-	//!!! uptime
-	//!!! nr_of_sessions
-	//!!! last session log
+	{ const ulong cur_millis=millis();
+	SPI_send_byte((cur_millis      ) & 255);
+	SPI_send_byte((cur_millis >>  8) & 255);
+	SPI_send_byte((cur_millis >> 16) & 255);
+	SPI_send_byte((cur_millis >> 24) & 255); }
 
-	{ for (ushort i=0;i < 512-8-1;i++)
-		SPI_send_byte(0 /*!!!!*/); }
+	{ for (uchar i=0;i < lenof(state_entering_counts);i++) {
+		SPI_send_byte((state_entering_counts[i]      ) & 255);
+		SPI_send_byte((state_entering_counts[i] >>  8) & 255);
+		}}
+
+	{ for (uchar i=0;i < cur_session_log_idx;i++)
+		SPI_send_byte(cur_session_log[i]); }
+
+	{ for (ushort i=0;i < 512-8-1-4-2*lenof(state_entering_counts)-cur_session_log_idx;i++)
+		SPI_send_byte(0xff); }
 
 	SPI_send_byte(0xff);	// Dummy CRC
 	SPI_send_byte(0xff);	// Dummy CRC
@@ -629,28 +685,14 @@ bool write_status_to_SD_card(const ulong block_idx,const uchar reason_code)
 	return true;
 	}
 
-static volatile ushort next_byte_idx=0;
-static volatile uchar max_value=0;
-
-static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
-static volatile uchar ADC_measurements_counter=0;
-static volatile uchar ADC_measurements_since_knock_shift8=0;
-
-struct knock_t {
-	uchar max_ADC_value;
-	uchar ADC_measurements_since_last_knock_shift8;
-	};
-
-static knock_t knocks_ringbuffer[32];
-static uchar next_knock_idx=0;
-
-struct interaction_state_t {
-	ushort audio_block_idx;
-	ushort audio_nr_of_blocks;
-	uchar next_state_idx_by_knocks[10-1];
-	};
-
-static interaction_state_t interaction_states[40];
+void update_ADC_random_crc(const uchar byte)
+{
+	ADC_random_crc^=byte;
+	{ for (uchar i=0;i < 8;i++) {
+		const ulong mask=-(ADC_random_crc & 1);
+		ADC_random_crc=(ADC_random_crc >> 1) ^ (mask & 0xedb88320UL);
+		}}
+	}
 
 ISR(ADC_vect)
 {
@@ -681,6 +723,8 @@ ISR(ADC_vect)
 																(lenof(knocks_ringbuffer)-1)].max_ADC_value;
 	if (*p < ADC_value)
 		*p = ADC_value; }
+
+	update_ADC_random_crc(ADC_value);
 
 	/*
 	if (ADC_value > max_value) {
@@ -747,12 +791,8 @@ void loop(void)
 		}}
 		*/
 
-	/*
-	Serial.println(translation_table[0x0fe],HEX);
-	Serial.println(translation_table[0x1fe],HEX);
-	Serial.println(translation_table[0x0ff],HEX);
-	Serial.println(translation_table[0x1ff],HEX);
-	*/
+	{ for (ushort i=0;i < lenof(state_entering_counts);i++)
+		state_entering_counts[i]=0; }
 
 	while (!read_interaction_script())
 		delay(500);		// Use low-power sleep?
@@ -790,11 +830,23 @@ void loop(void)
 																			(lenof(knocks_ringbuffer)-1);
 			const uchar prev_state_idx=cur_interaction_state_idx;
 
-			if (cur_interaction_state_idx == 0xff)
+			if (cur_interaction_state_idx >= MAX_INTERACTION_STATES) {
 				cur_interaction_state_idx=0;
+				cur_session_log_idx=0;
+
+				write_status_to_SD_card(0x02);
+				Serial.flush();
+				}
 			else
 				cur_interaction_state_idx=interaction_states[cur_interaction_state_idx].
 															next_state_idx_by_knocks[min(nr_of_knocks,10)-1];
+
+			if (cur_interaction_state_idx < MAX_INTERACTION_STATES) {
+				state_entering_counts[cur_interaction_state_idx]++;
+
+				if (cur_session_log_idx < lenof(cur_session_log))
+					cur_session_log[cur_session_log_idx++]=cur_interaction_state_idx;
+				}
 
 			Serial.print("Knocks: ");
 			Serial.print(nr_of_knocks);
@@ -829,6 +881,12 @@ void loop(void)
 
 			last_knock_idx=_next_knock_idx;
 			}
+
+		const ushort log_interval_nr=(ushort)(millis() >> 20);		// One interval per ca 17min
+		if (log_interval_nr != last_written_log_interval_nr) {
+			write_status_to_SD_card(0x01);
+			Serial.flush();
+			}
 		}
 
 	delay(2000);
@@ -841,10 +899,4 @@ void loop(void)
 		last_played_value=play_sound(2*AUDIO_SAMPLE_RATE);
 	SD_card_CS_high();
 	sei();
-
-	Serial.println(last_played_value,HEX);	//!!!
-	Serial.println(translation_table[0x0fe],HEX);
-	Serial.println(translation_table[0x1fe],HEX);
-	Serial.println(translation_table[0x0ff],HEX);
-	Serial.println(translation_table[0x1ff],HEX);
 	}
