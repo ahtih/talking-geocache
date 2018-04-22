@@ -15,7 +15,7 @@ typedef signed long slong;
 
 #define AUDIO_SAMPLE_RATE			(F_CPU/(6*2*16))
 
-#define ADC_MEASUREMENTS_PER_SEC	(F_CPU/(64*13))
+#define ADC_MEASUREMENTS_PER_SEC	((ushort)(F_CPU*0.63f/(64*13)))
 #define MIN_ADC_THRESHOLD			10
 
 #define MIN_SD_CARD_LOG_BLOCK_IDX	( 200UL*1024UL*(1024/512))
@@ -32,6 +32,7 @@ static volatile uchar max_value=0;
 
 static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
 static volatile uchar ADC_measurements_counter=0;
+static volatile ulong cur_milliseconds=0;
 static volatile ushort ADC_measurements_since_knock_shift8=0;
 
 struct knock_t {
@@ -423,7 +424,7 @@ uchar SPI_receive_byte(void)
 
 void SD_card_wait_busy(const ushort timeout_ms)
 {
-	const ushort start_time=millis();
+	const ushort start_time=(ushort)millis();
 	do {
 		if (SPI_receive_byte() == 0xff)
 			return;
@@ -514,7 +515,7 @@ bool init_SD_card(void)
 	Serial.println("Initing SD card");
 	SD_card_CS_low();
 
-	{ const ushort start_time=millis();
+	{ const ushort start_time=(ushort)millis();
 	while (1) {
 		if (SD_card_command(0,0,0x95) == 1)
 			break;
@@ -532,7 +533,7 @@ bool init_SD_card(void)
 	SPI_receive_byte();
 	SPI_receive_byte();
 
-	{ const ushort start_time=millis();
+	{ const ushort start_time=(ushort)millis();
 	while (1) {
 		if (SD_card_Acommand(41,0x40000000) == 0)
 			break;
@@ -571,7 +572,7 @@ bool start_SD_card_read(const ulong block_idx)
 		return false;
 		}
 
-	{ const ushort start_time=millis();
+	{ const ushort start_time=(ushort)millis();
 	while (1) {
 		const uchar status=SPI_receive_byte();
 		if (status == 0xfe)
@@ -642,11 +643,10 @@ bool write_status_to_SD_card(const uchar reason_code)
 
 	SPI_send_byte(reason_code);
 
-	{ const ulong cur_millis=millis();
-	SPI_send_byte((cur_millis      ) & 255);
-	SPI_send_byte((cur_millis >>  8) & 255);
-	SPI_send_byte((cur_millis >> 16) & 255);
-	SPI_send_byte((cur_millis >> 24) & 255); }
+	SPI_send_byte((cur_milliseconds      ) & 255);
+	SPI_send_byte((cur_milliseconds >>  8) & 255);
+	SPI_send_byte((cur_milliseconds >> 16) & 255);
+	SPI_send_byte((cur_milliseconds >> 24) & 255);
 
 	{ for (uchar i=0;i < lenof(state_entering_counts);i++) {
 		SPI_send_byte((state_entering_counts[i]      ) & 255);
@@ -682,6 +682,7 @@ bool write_status_to_SD_card(const uchar reason_code)
 		return false;
 		}
 
+	Serial.println("Status writing done");
 	return true;
 	}
 
@@ -705,11 +706,13 @@ ISR(ADC_vect)
 
 		if (ADC_measurements_since_knock_shift8 < 0xffffU)
 			ADC_measurements_since_knock_shift8++;
+
+		cur_milliseconds+=(1000UL*256UL + ADC_MEASUREMENTS_PER_SEC/2) / ADC_MEASUREMENTS_PER_SEC;
 		}
 
 	const uchar ADC_value=ADCH;
 	if (ADC_threshold < ADC_value) {
-		if (ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC/(7*256))) {
+		if (ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC/(5*256))) {
 			knocks_ringbuffer[next_knock_idx].max_ADC_value=ADC_value;
 			knocks_ringbuffer[next_knock_idx].ADC_measurements_since_last_knock_shift8=
 																(uchar)ADC_measurements_since_knock_shift8;
@@ -816,10 +819,12 @@ void loop(void)
 
 	uchar last_knock_idx=next_knock_idx;
 	while (1) {
-		SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
-		sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
-		// After ADC interrupt, execution resumes from this point
-		SMCR=0;
+		{ for (uchar i=100;i;i--) {
+			SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
+			sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
+			// After ADC interrupt, execution resumes from this point
+			SMCR=0;
+			}}
 
 		/*
 		const ushort delta=knocks_done - knocks_printed;
@@ -831,8 +836,8 @@ void loop(void)
 			*/
 
 		const uchar _next_knock_idx=next_knock_idx;
-		if (ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*2/256) &&
-																		last_knock_idx != _next_knock_idx) {
+		if (last_knock_idx != _next_knock_idx && ADC_measurements_since_knock_shift8 >=
+																(ushort)(ADC_MEASUREMENTS_PER_SEC*2/256)) {
 			/*
 			{ for (ushort i=0;i < next_byte_idx;i++)
 				Serial.println(translation_table[i]); }
@@ -894,8 +899,8 @@ void loop(void)
 
 			last_knock_idx=_next_knock_idx;
 			}
-		else if (ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*90/256) &&
-																	cur_interaction_state_idx != 0xff) {
+		else if (cur_interaction_state_idx != 0xff &&
+						ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*90/256)) {
 			Serial.print("Session timeout in state ");
 			Serial.print(cur_interaction_state_idx);
 			Serial.print("\n");
@@ -907,7 +912,7 @@ void loop(void)
 			Serial.flush();
 			}
 
-		const ushort log_interval_nr=(ushort)(millis() >> 20);		// One interval per ca 17min
+		const ushort log_interval_nr=(ushort)(cur_milliseconds >> 20);		// One interval per ca 17min
 		if (log_interval_nr != last_written_log_interval_nr && cur_interaction_state_idx == 0xff) {
 			write_status_to_SD_card(0x01);
 			Serial.flush();
