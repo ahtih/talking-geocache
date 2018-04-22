@@ -32,7 +32,7 @@ static volatile uchar max_value=0;
 
 static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
 static volatile uchar ADC_measurements_counter=0;
-static volatile uchar ADC_measurements_since_knock_shift8=0;
+static volatile ushort ADC_measurements_since_knock_shift8=0;
 
 struct knock_t {
 	uchar max_ADC_value;
@@ -703,16 +703,16 @@ ISR(ADC_vect)
 		if (ADC_threshold < MIN_ADC_THRESHOLD)
 			ADC_threshold = MIN_ADC_THRESHOLD;
 
-		if (ADC_measurements_since_knock_shift8 < 0xffU)
+		if (ADC_measurements_since_knock_shift8 < 0xffffU)
 			ADC_measurements_since_knock_shift8++;
 		}
 
 	const uchar ADC_value=ADCH;
 	if (ADC_threshold < ADC_value) {
-		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC/(7*256))) {
+		if (ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC/(7*256))) {
 			knocks_ringbuffer[next_knock_idx].max_ADC_value=ADC_value;
 			knocks_ringbuffer[next_knock_idx].ADC_measurements_since_last_knock_shift8=
-																	ADC_measurements_since_knock_shift8;
+																(uchar)ADC_measurements_since_knock_shift8;
 			next_knock_idx=(next_knock_idx + 1) & (lenof(knocks_ringbuffer)-1);
 			ADC_measurements_since_knock_shift8=0;
 			}
@@ -818,7 +818,7 @@ void loop(void)
 			*/
 
 		const uchar _next_knock_idx=next_knock_idx;
-		if (ADC_measurements_since_knock_shift8 >= (uchar)(ADC_MEASUREMENTS_PER_SEC*2/256) &&
+		if (ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*2/256) &&
 																		last_knock_idx != _next_knock_idx) {
 			/*
 			{ for (ushort i=0;i < next_byte_idx;i++)
@@ -881,9 +881,21 @@ void loop(void)
 
 			last_knock_idx=_next_knock_idx;
 			}
+		else if (ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*90/256) &&
+																	cur_interaction_state_idx != 0xff) {
+			Serial.print("Session timeout in state ");
+			Serial.print(cur_interaction_state_idx);
+			Serial.print("\n");
+			Serial.flush();
+
+			cur_interaction_state_idx=0xff;
+
+			write_status_to_SD_card(0x03);
+			Serial.flush();
+			}
 
 		const ushort log_interval_nr=(ushort)(millis() >> 20);		// One interval per ca 17min
-		if (log_interval_nr != last_written_log_interval_nr) {
+		if (log_interval_nr != last_written_log_interval_nr && cur_interaction_state_idx == 0xff) {
 			write_status_to_SD_card(0x01);
 			Serial.flush();
 
