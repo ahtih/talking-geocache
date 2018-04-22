@@ -19,7 +19,7 @@ def value_error(byte1,byte2):
 
 def translate_value_to_byte(value):
 	if value:
-		value=((int(127 + 20*math.log(abs(value) / float(2**15))) * (+1 if value >= 0 else -1)) & 255)
+		value=((max(0,int(127 + 20*math.log(abs(value) / float(2**15)))) * (+1 if value >= 0 else -1)) & 255)
 	else:
 		value=0
 
