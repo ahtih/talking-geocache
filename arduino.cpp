@@ -472,7 +472,7 @@ uchar bitreverse_byte(uchar value)
 	return result;
 	}
 
-bool start_SD_card_read(const ulong block_idx)
+bool init_SD_card(void)
 {		// Returns true on success
 
 	Serial.println("Initing SD card");
@@ -520,6 +520,14 @@ bool start_SD_card_read(const ulong block_idx)
 	SPI_receive_byte();
 
 	Serial.println("  SD card inited");
+	return true;
+	}
+
+bool start_SD_card_read(const ulong block_idx)
+{		// Returns true on success
+
+	if (!init_SD_card())
+		return false;
 
 	if (SD_card_command(18,block_idx)) {
 		SD_card_CS_high();
@@ -561,6 +569,64 @@ void SD_card_read_blocks(const uint nr_of_blocks)
 		}}
 	Serial.println();
 	Serial.println("SD card read done");
+	}
+
+bool write_status_to_SD_card(const ulong block_idx,const uchar reason_code)
+{		// Returns true on success
+
+	if (!init_SD_card())
+		return false;
+
+	if (SD_card_command(24,block_idx)) {
+		SD_card_CS_high();
+		Serial.println("CMD24 returned error");
+		return false;
+		}
+
+	SPI_send_byte(0xfe);
+
+	SPI_send_byte('G');
+	SPI_send_byte('E');
+	SPI_send_byte('O');
+	SPI_send_byte('C');
+	SPI_send_byte('A');
+	SPI_send_byte('C');
+	SPI_send_byte('H');
+	SPI_send_byte('E');
+
+	SPI_send_byte(reason_code);
+
+	//!!! uptime
+	//!!! nr_of_sessions
+	//!!! last session log
+
+	{ for (ushort i=0;i < 512-8-1;i++)
+		SPI_send_byte(0 /*!!!!*/); }
+
+	SPI_send_byte(0xff);	// Dummy CRC
+	SPI_send_byte(0xff);	// Dummy CRC
+
+	if ((SPI_receive_byte() & 0x1f) != 0x05) {
+		SD_card_CS_high();
+		Serial.println("Write data not accepted");
+		return false;
+		}
+
+	SD_card_wait_busy(600);
+
+	if (SD_card_command(13,0UL)) {
+		SD_card_CS_high();
+		Serial.println("CMD13 returned error");
+		return false;
+		}
+
+	if (SPI_receive_byte()) {
+		SD_card_CS_high();
+		Serial.println("CMD13 byte 2 indicated error");
+		return false;
+		}
+
+	return true;
 	}
 
 static volatile ushort next_byte_idx=0;
