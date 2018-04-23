@@ -509,10 +509,8 @@ uchar bitreverse_byte(uchar value)
 	return result;
 	}
 
-bool init_SD_card(void)
-{		// Returns true on success
-
-	Serial.println("Initing SD card");
+bool reset_SD_card(void)
+{
 	SD_card_CS_low();
 
 	{ const ushort start_time=(ushort)millis();
@@ -525,7 +523,18 @@ bool init_SD_card(void)
 			return false;
 			}
 		}}
+
 	Serial.println("  CMD0 done");
+	return true;
+	}
+
+bool init_SD_card(void)
+{		// Returns true on success
+
+	Serial.println("Initing SD card");
+
+	if (!reset_SD_card())
+		return false;
 
 	SD_card_command(8,0x1aa,0x87);
 	SPI_receive_byte();
@@ -682,6 +691,9 @@ bool write_status_to_SD_card(const uchar reason_code)
 		return false;
 		}
 
+	reset_SD_card();
+	SD_card_CS_high();
+
 	Serial.println("Status writing done");
 	return true;
 	}
@@ -749,8 +761,10 @@ void play_sound_from_SD_card(const ulong block_idx,const ulong nr_of_samples)
 
 	cli();
 	play_sound(nr_of_samples);
-	SD_card_CS_high();
 	sei();
+
+	reset_SD_card();
+	SD_card_CS_high();
 	}
 
 bool read_interaction_script(void)
@@ -763,10 +777,11 @@ bool read_interaction_script(void)
 
 		//!!! Add support for scripts larger than one block
 
-	SD_card_CS_high();
-
 	Serial.print("Interaction script reading done\n");
 	Serial.flush();
+
+	reset_SD_card();
+	SD_card_CS_high();
 
 	{ for (ushort j=0;j < 10;j++) {
 		Serial.print(interaction_states[j].audio_block_idx,HEX);
