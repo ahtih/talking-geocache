@@ -403,16 +403,6 @@ ushort play_sound(const ulong samples_to_play)
 #define SPI_DEFAULT_SS_PIN	PB2
 #define SD_CARD_CS_PIN		PC0
 
-void SD_card_CS_high()
-{
-	PORTC|=(1 << SD_CARD_CS_PIN);
-	}
-
-void SD_card_CS_low()
-{
-	PORTC&=(uchar)~(1 << SD_CARD_CS_PIN);
-	}
-
 void SPI_send_byte(const uchar value)
 {
 	SPDR=value;
@@ -435,9 +425,31 @@ void SD_card_wait_busy(const ushort timeout_ms)
 		} while (((ushort)millis() - start_time) < timeout_ms);
 	}
 
+void disable_SPI_and_SD_card()
+{
+	PORTC|=(1 << SD_CARD_CS_PIN);
+	SPCR=0;		// Disable SPI
+
+	PORTB=0;	// Make sure PORTB5 is LOW, since it has a LED on it
+	}
+
+void enable_SPI_and_SD_card()
+{
+	PORTC&=(uchar)~(1 << SD_CARD_CS_PIN);
+
+	// Init SPI at Fosc/16 = 500kHz
+	SPCR=(1 << SPE) | (1 << MSTR) | (0 << SPR1) | (1 << SPR0);
+	SPSR&=~(1 << SPI2X);
+
+		// Wait 74+ clock cycles with CS high
+
+	{ for (uchar i=0;i < 10;i++)
+		SPI_send_byte(0xff); }
+	}
+
 uchar SD_card_command(const uchar cmd,const ulong arg,const uchar crc=0xff)
 {
-	SD_card_CS_low();
+	enable_SPI_and_SD_card();
 	SD_card_wait_busy(300);
 
 	SPI_send_byte(cmd | 0x40);
@@ -471,16 +483,7 @@ void setup(void)
 	DDRC=(1 << SD_CARD_CS_PIN);
 	DDRD=(1 << AUDIO_LRCLK_PIN);
 
-	SD_card_CS_high();
-
-	// Init SPI at Fosc/16 = 500kHz
-	SPCR=(1 << SPE) | (1 << MSTR) | (0 << SPR1) | (1 << SPR0);
-	SPSR&=~(1 << SPI2X);
-
-		// Wait 74+ clock cycles with CS high
-
-	{ for (uchar i=0;i < 10;i++)
-		SPI_send_byte(0xff); }
+	disable_SPI_and_SD_card();
 
 	// ADCSRB=0;		// ADC Free Running mode; needed only when not using sleep mode
 	ADMUX=(1 << REFS1) + (1 << REFS0) + (1 << ADLAR) + 1;	// Select 1.1V ADC reference and ADC channel 1
@@ -515,14 +518,14 @@ uchar bitreverse_byte(uchar value)
 
 bool reset_SD_card(void)
 {
-	SD_card_CS_low();
+	enable_SPI_and_SD_card();
 
 	{ const ushort start_time=(ushort)millis();
 	while (1) {
 		if (SD_card_command(0,0,0x95) == 1)
 			break;
 		if ((ushort)(millis() - start_time) > 2000) {
-			SD_card_CS_high();
+			disable_SPI_and_SD_card();
 			Serial.println("CMD0 returned error");
 			return false;
 			}
@@ -551,7 +554,7 @@ bool init_SD_card(void)
 		if (SD_card_Acommand(41,0x40000000) == 0)
 			break;
 		if ((ushort)(millis() - start_time) > 2000) {
-			SD_card_CS_high();
+			disable_SPI_and_SD_card();
 			Serial.println("ACMD41 returned error");
 			return false;
 			}
@@ -559,7 +562,7 @@ bool init_SD_card(void)
 	Serial.println("  ACMD41 done");
 
 	if (SD_card_command(58,0)) {
-		SD_card_CS_high();
+		disable_SPI_and_SD_card();
 		Serial.println("CMD58 returned error");
 		return false;
 		}
@@ -580,7 +583,7 @@ bool start_SD_card_read(const ulong block_idx)
 		return false;
 
 	if (SD_card_command(18,block_idx)) {
-		SD_card_CS_high();
+		disable_SPI_and_SD_card();
 		Serial.println("CMD18 returned error");
 		return false;
 		}
@@ -591,12 +594,12 @@ bool start_SD_card_read(const ulong block_idx)
 		if (status == 0xfe)
 			break;
 		if (status != 0xff) {
-			SD_card_CS_high();
+			disable_SPI_and_SD_card();
 			Serial.println("Read block start error");
 			return false;
 			}
 		if ((ushort)(millis() - start_time) > 300) {
-			SD_card_CS_high();
+			disable_SPI_and_SD_card();
 			Serial.println("Read block start timeout");
 			return false;
 			}
@@ -638,7 +641,7 @@ bool write_status_to_SD_card(const uchar reason_code)
 		return false;
 
 	if (SD_card_command(24,log_writing_SD_card_block_idx)) {
-		SD_card_CS_high();
+		disable_SPI_and_SD_card();
 		Serial.println("CMD24 returned error");
 		return false;
 		}
@@ -676,7 +679,7 @@ bool write_status_to_SD_card(const uchar reason_code)
 	SPI_send_byte(0xff);	// Dummy CRC
 
 	if ((SPI_receive_byte() & 0x1f) != 0x05) {
-		SD_card_CS_high();
+		disable_SPI_and_SD_card();
 		Serial.println("Write data not accepted");
 		return false;
 		}
@@ -684,19 +687,19 @@ bool write_status_to_SD_card(const uchar reason_code)
 	SD_card_wait_busy(600);
 
 	if (SD_card_command(13,0UL)) {
-		SD_card_CS_high();
+		disable_SPI_and_SD_card();
 		Serial.println("CMD13 returned error");
 		return false;
 		}
 
 	if (SPI_receive_byte()) {
-		SD_card_CS_high();
+		disable_SPI_and_SD_card();
 		Serial.println("CMD13 byte 2 indicated error");
 		return false;
 		}
 
 	reset_SD_card();
-	SD_card_CS_high();
+	disable_SPI_and_SD_card();
 
 	Serial.println("Status writing done");
 	return true;
@@ -766,7 +769,7 @@ void play_sound_from_SD_card(const ulong block_idx,const ulong nr_of_samples)
 	sei();
 
 	reset_SD_card();
-	SD_card_CS_high();
+	disable_SPI_and_SD_card();
 	}
 
 bool read_interaction_script(void)
@@ -783,7 +786,7 @@ bool read_interaction_script(void)
 	Serial.flush();
 
 	reset_SD_card();
-	SD_card_CS_high();
+	disable_SPI_and_SD_card();
 
 	{ for (ushort j=0;j < 10;j++) {
 		Serial.print(interaction_states[j].audio_block_idx,HEX);
@@ -970,6 +973,6 @@ void loop(void)
 	cli();
 	while (1)
 		last_played_value=play_sound(2*AUDIO_SAMPLE_RATE);
-	SD_card_CS_high();
+	disable_SPI_and_SD_card();
 	sei();
 	}
