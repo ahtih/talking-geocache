@@ -13,10 +13,14 @@ typedef signed long slong;
 
 #define lenof(t)	(sizeof(t)/sizeof(*t))
 
-#define AUDIO_SAMPLE_RATE			(F_CPU/(6*2*16))
+#define AUDIO_SAMPLE_RATE				(F_CPU/(6*2*16))
 
-#define ADC_MEASUREMENTS_PER_SEC	((ushort)(F_CPU*0.63f/(64*13)))
-#define MIN_ADC_THRESHOLD			10
+#define ADC_SINGLE_MEASUREMENT_SECONDS	(64*13*1.6f / F_CPU)
+#define TIMER2_CLOCKS_PER_SEC			(F_CPU/256)
+
+#define ADC_MEASUREMENTS_PER_SEC		500
+#define NR_OF_MEASUREMENTS_IN_BATCH		10
+#define MIN_ADC_THRESHOLD				10
 
 #define MIN_SD_CARD_LOG_BLOCK_IDX	( 200UL*1024UL*(1024/512))
 #define MAX_SD_CARD_LOG_BLOCK_IDX	(1000UL*1024UL*(1024/512))
@@ -33,11 +37,11 @@ static volatile uchar max_value=0;
 static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
 static volatile uchar ADC_measurements_counter=0;
 static volatile ulong cur_milliseconds=0;
-static volatile ushort ADC_measurements_since_knock_shift8=0;
+static volatile ushort ADC_measurements_since_knock_shift4=0;
 
 struct knock_t {
 	uchar max_ADC_value;
-	uchar ADC_measurements_since_last_knock_shift8;
+	uchar ADC_measurements_since_last_knock_shift4;
 	};
 
 static knock_t knocks_ringbuffer[32];
@@ -711,25 +715,23 @@ ISR(ADC_vect)
 {
 	ADC_measurements_counter++;
 
-	if (!ADC_measurements_counter) {
-		ADC_threshold=((ADC_threshold * (ushort)(0.94f*256)) >> 8);
+	if (!(ADC_measurements_counter & 0x0f)) {
+		ADC_threshold=((ADC_threshold * (ushort)(0.954f*256)) >> 8);
 		if (ADC_threshold < MIN_ADC_THRESHOLD)
 			ADC_threshold = MIN_ADC_THRESHOLD;
 
-		if (ADC_measurements_since_knock_shift8 < 0xffffU)
-			ADC_measurements_since_knock_shift8++;
-
-		cur_milliseconds+=(1000UL*256UL + ADC_MEASUREMENTS_PER_SEC/2) / ADC_MEASUREMENTS_PER_SEC;
+		if (ADC_measurements_since_knock_shift4 < 0xffffU)
+			ADC_measurements_since_knock_shift4++;
 		}
 
 	const uchar ADC_value=ADCH;
 	if (ADC_threshold < ADC_value) {
-		if (ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC/(5*256))) {
+		if (ADC_measurements_since_knock_shift4 >= (ushort)(ADC_MEASUREMENTS_PER_SEC/(5*16))) {
 			knocks_ringbuffer[next_knock_idx].max_ADC_value=ADC_value;
-			knocks_ringbuffer[next_knock_idx].ADC_measurements_since_last_knock_shift8=
-																(uchar)ADC_measurements_since_knock_shift8;
+			knocks_ringbuffer[next_knock_idx].ADC_measurements_since_last_knock_shift4=
+																(uchar)ADC_measurements_since_knock_shift4;
 			next_knock_idx=(next_knock_idx + 1) & (lenof(knocks_ringbuffer)-1);
-			ADC_measurements_since_knock_shift8=0;
+			ADC_measurements_since_knock_shift4=0;
 			}
 		ADC_threshold=ADC_value;
 		}
@@ -801,6 +803,25 @@ bool read_interaction_script(void)
 	return true;
 	}
 
+ISR(TIMER2_OVF_vect) {}		// Do nothing, just wake up from sleep
+
+void low_power_sleep(const uchar timer_counts)
+{
+	cli();
+	ASSR=0;								// Disable Timer2 asynchronous operation
+	TCCR2A=0;							// Timer2 Normal mode
+	TCNT2=-timer_counts;
+    TIMSK2=(1 << TOIE2);				// Enable Timer2 overflow interrupt
+	TCCR2B=(1 << CS22) + (1 << CS21);	// Set Timer2 prescaler=256 and start timer
+    sei();
+
+	SMCR=(1 << SM2) + (1 << SM1) + (1 << SM0) + (1 << SE);	// Select "Extended Standby" sleep mode
+	sleep_cpu();	// CPU is put to sleep now
+
+	// After wakeup, execution resumes from this point
+	SMCR=0;
+	}
+
 void loop(void)
 {
 	/*
@@ -834,12 +855,17 @@ void loop(void)
 
 	uchar last_knock_idx=next_knock_idx;
 	while (1) {
-		{ for (uchar i=100;i;i--) {
+		{ for (uchar i=NR_OF_MEASUREMENTS_IN_BATCH;i;i--) {
 			SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
 			sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
 			// After ADC interrupt, execution resumes from this point
 			SMCR=0;
+
+			low_power_sleep((uchar)(TIMER2_CLOCKS_PER_SEC *
+										(1.0f/ADC_MEASUREMENTS_PER_SEC - ADC_SINGLE_MEASUREMENT_SECONDS)));
 			}}
+
+		cur_milliseconds+=1000UL*NR_OF_MEASUREMENTS_IN_BATCH / ADC_MEASUREMENTS_PER_SEC;
 
 		/*
 		const ushort delta=knocks_done - knocks_printed;
@@ -851,8 +877,8 @@ void loop(void)
 			*/
 
 		const uchar _next_knock_idx=next_knock_idx;
-		if (last_knock_idx != _next_knock_idx && ADC_measurements_since_knock_shift8 >=
-																(ushort)(ADC_MEASUREMENTS_PER_SEC*2/256)) {
+		if (last_knock_idx != _next_knock_idx && ADC_measurements_since_knock_shift4 >=
+																(ushort)(ADC_MEASUREMENTS_PER_SEC*2/16)) {
 			/*
 			{ for (ushort i=0;i < next_byte_idx;i++)
 				Serial.println(translation_table[i]); }
@@ -889,7 +915,7 @@ void loop(void)
 
 			{ for (uchar i=last_knock_idx;i != _next_knock_idx;i=(i + 1) & (lenof(knocks_ringbuffer)-1)) {
 				Serial.print("   ");
-				Serial.print(knocks_ringbuffer[i].ADC_measurements_since_last_knock_shift8);
+				Serial.print(knocks_ringbuffer[i].ADC_measurements_since_last_knock_shift4);
 				Serial.print(" ");
 				Serial.print(knocks_ringbuffer[i].max_ADC_value);
 				Serial.print("\n");
@@ -915,7 +941,7 @@ void loop(void)
 			last_knock_idx=_next_knock_idx;
 			}
 		else if (cur_interaction_state_idx != 0xff &&
-						ADC_measurements_since_knock_shift8 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*90UL/256)) {
+						ADC_measurements_since_knock_shift4 >= (ushort)(ADC_MEASUREMENTS_PER_SEC*90UL/16)) {
 			Serial.print("Session timeout in state ");
 			Serial.print(cur_interaction_state_idx);
 			Serial.print("\n");
