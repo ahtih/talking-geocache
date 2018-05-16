@@ -15,7 +15,7 @@ typedef signed long slong;
 
 #define AUDIO_SAMPLE_RATE				(F_CPU/(6*2*16))
 
-#define ADC_SINGLE_MEASUREMENT_SECONDS	(64*13*1.6f / F_CPU)
+#define ADC_SINGLE_MEASUREMENT_SECONDS	(2*13*1.6f / F_CPU)
 #define TIMER2_CLOCKS_PER_SEC			(F_CPU/256)
 
 #define ADC_MEASUREMENTS_PER_SEC		500
@@ -496,9 +496,9 @@ void setup(void)
 
 	// ADCSRB=0;		// ADC Free Running mode; needed only when not using sleep mode
 	ADMUX=(1 << REFS1) + (1 << REFS0) + (1 << ADLAR) + 1;	// Select 1.1V ADC reference and ADC channel 1
-					// Select ADC clock = Fosc/64 = 125kHz and enable ADC
+					// Select ADC clock = Fosc/2 and enable ADC
 	DIDR0=(1 << ADC1D);
-	ADCSRA=(1 << ADEN) + (0 << ADSC) + (0 << ADATE) + (1 << ADPS2) + (1 << ADPS1);
+	ADCSRA=(1 << ADEN) + (0 << ADSC) + (0 << ADATE);
 
 	Serial.begin(9600);
 	}
