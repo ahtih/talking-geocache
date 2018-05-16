@@ -145,7 +145,7 @@ ushort play_sound(const ulong samples_to_play)
 #define PLAY_EMPTY_SET_LRCLK0()	\
 	{ uchar tmp;\
 	__asm__ __volatile__ (\
-		"ldi %0,0     \n\t"\
+		"ldi %0,0x40  \n\t"\
 		"out %2,%0    \n\t"\
 		"out %1,%0    \n\t"\
 		"nop		  \n\t"\
@@ -164,7 +164,7 @@ ushort play_sound(const ulong samples_to_play)
 		"sbi %2,0     \n\t"	/* 2 clocks */ \
 					  \
 		"andi %0,0xfe \n\t"\
-		"ldi %1,0x80  \n\t"\
+		"ldi %1,0xc0  \n\t"\
 		"out %2,%0    \n\t"\
 		"lsr %0       \n\t"\
 		"sbi %2,0     \n\t"	/* 2 clocks */ \
@@ -394,6 +394,7 @@ ushort play_sound(const ulong samples_to_play)
 	}
 
 #define AUDIO_LRCLK_PIN		PD7
+#define AUDIO_SD_MODE_PIN	PD6
 #define AUDIO_BCLK_PIN		PB0
 #define AUDIO_DATA_PIN		PB1
 
@@ -427,6 +428,10 @@ void SD_card_wait_busy(const ushort timeout_ms)
 
 void disable_SPI_and_SD_card()
 {
+		// Set SD_MODE=shutdown
+	DDRD&=(uchar)~(1 << AUDIO_SD_MODE_PIN);
+	PORTD&=(uchar)~(1 << AUDIO_SD_MODE_PIN);
+
 	PORTC|=(1 << SD_CARD_CS_PIN);
 	SPCR=0;		// Disable SPI
 
@@ -435,6 +440,10 @@ void disable_SPI_and_SD_card()
 
 void enable_SPI_and_SD_card()
 {
+		// Set SD_MODE=play left channel
+	DDRD|=(1 << AUDIO_SD_MODE_PIN);
+	PORTD|=(1 << AUDIO_SD_MODE_PIN);
+
 	PORTC&=(uchar)~(1 << SD_CARD_CS_PIN);
 
 	// Init SPI at Fosc/16 = 500kHz
