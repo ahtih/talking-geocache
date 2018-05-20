@@ -15,7 +15,8 @@ typedef signed long slong;
 
 #define AUDIO_SAMPLE_RATE				(F_CPU/(6*2*16))
 
-#define ADC_SINGLE_MEASUREMENT_SECONDS	(2*13*1.6f / F_CPU)
+#define NR_OF_ADC_MEASUREMENTS_TO_IGNORE	1
+#define ADC_SINGLE_MEASUREMENT_SECONDS	(2*(25 + NR_OF_ADC_MEASUREMENTS_TO_IGNORE*13)/(float)F_CPU)
 #define TIMER2_CLOCKS_PER_SEC			(F_CPU/256)
 
 #define ADC_MEASUREMENTS_PER_SEC		500
@@ -38,6 +39,7 @@ static volatile uchar ADC_threshold=MIN_ADC_THRESHOLD;
 static volatile uchar ADC_measurements_counter=0;
 static volatile ulong cur_milliseconds=0;
 static volatile ushort ADC_measurements_since_knock_shift4=0;
+static volatile uchar ignore_measurements_counter=0;
 
 struct knock_t {
 	uchar max_ADC_value;
@@ -496,9 +498,7 @@ void setup(void)
 
 	// ADCSRB=0;		// ADC Free Running mode; needed only when not using sleep mode
 	ADMUX=(1 << REFS1) + (1 << REFS0) + (1 << ADLAR) + 1;	// Select 1.1V ADC reference and ADC channel 1
-					// Select ADC clock = Fosc/2 and enable ADC
 	DIDR0=(1 << ADC1D);
-	ADCSRA=(1 << ADEN) + (0 << ADSC) + (0 << ADATE);
 
 	Serial.begin(9600);
 	}
@@ -725,6 +725,11 @@ void update_ADC_random_crc(const uchar byte)
 
 ISR(ADC_vect)
 {
+	if (ignore_measurements_counter) {
+		ignore_measurements_counter--;
+		return;
+		}
+
 	ADC_measurements_counter++;
 
 	if (!(ADC_measurements_counter & 0x0f)) {
@@ -861,17 +866,27 @@ void loop(void)
 	while (!read_interaction_script())
 		delay(500);		// Use low-power sleep?
 
-	ADCSRA|=(1 << ADIE) + (1 << ADIF);		// Enable ADC interrupt
-
 	uchar cur_interaction_state_idx=0xff;
 
 	uchar last_knock_idx=next_knock_idx;
 	while (1) {
 		{ for (uchar i=NR_OF_MEASUREMENTS_IN_BATCH;i;i--) {
-			SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
-			sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
-			// After ADC interrupt, execution resumes from this point
-			SMCR=0;
+			ADCSRA=(1 << ADEN) + (1 << ADIE) + (1 << ADIF);	// Enable ADC, select Fosc/2, clear interrupt flag
+			ignore_measurements_counter=NR_OF_ADC_MEASUREMENTS_TO_IGNORE;
+
+			while (1) {
+				const uchar prev_ignore_measurements_counter=ignore_measurements_counter;
+
+				SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
+				sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
+				// After ADC interrupt, execution resumes from this point
+				SMCR=0;
+
+				if (!prev_ignore_measurements_counter)
+					break;
+				}
+
+			ADCSRA=0;		// Disable ADC
 
 			low_power_sleep((uchar)(TIMER2_CLOCKS_PER_SEC *
 										(1.0f/ADC_MEASUREMENTS_PER_SEC - ADC_SINGLE_MEASUREMENT_SECONDS)));
