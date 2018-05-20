@@ -833,6 +833,8 @@ void low_power_sleep(const uchar timer_counts)
     sei();
 
 	SMCR=(1 << SM2) + (1 << SM1) + (1 << SM0) + (1 << SE);	// Select "Extended Standby" sleep mode
+
+	sleep_bod_disable();
 	sleep_cpu();	// CPU is put to sleep now
 
 	// After wakeup, execution resumes from this point
