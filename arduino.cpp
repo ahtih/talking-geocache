@@ -832,7 +832,7 @@ void low_power_sleep(const uchar timer_counts)
 	TCCR2B=(1 << CS22) + (1 << CS21);	// Set Timer2 prescaler=256 and start timer
     sei();
 
-	SMCR=(1 << SM2) + (1 << SM1) + (1 << SM0) + (1 << SE);	// Select "Extended Standby" sleep mode
+	SMCR=(0 << SM2) + (1 << SM1) + (1 << SM0) + (1 << SE);	// Select "Power save" sleep mode
 
 	sleep_bod_disable();
 	sleep_cpu();	// CPU is put to sleep now
