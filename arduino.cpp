@@ -498,6 +498,20 @@ void setup(void)
 	TCCR2B=0;
 	ADCSRA=0;
 
+	/*
+	PRR=PRTWI	|	// Shut Down TWI Clock
+		PRTIM0	|	// Shut Down Timer0
+		PRTIM1	|	// Shut Down Timer1
+		PRTIM2	|	// Shut Down Timer2
+		PRSPI	|	// Shut Down SPI Clock
+		PRUSART0|	// Shut Down USART0
+		PRADC;		// Shut Down ADC
+
+	SMCR=(1 << SM1) + (1 << SM0) + (1 << SE);	// Select "Power save" sleep mode
+	sleep_cpu();	// CPU is put to sleep now
+	SMCR=0;		// After wakeup, execution resumes from this point
+	*/
+
 	DDRB=(1 << AUDIO_BCLK_PIN) + (1 << AUDIO_DATA_PIN) +
 			(1 << SPI_MOSI_PIN) + (1 << SPI_SCK_PIN) + (1 << SPI_DEFAULT_SS_PIN);
 	DDRC=(1 << SD_CARD_CS_PIN);
