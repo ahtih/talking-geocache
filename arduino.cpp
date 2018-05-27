@@ -438,10 +438,13 @@ void disable_SPI_and_SD_card()
 	SPCR=0;		// Disable SPI
 
 	PORTB=0;	// Make sure PORTB5 is LOW, since it has a LED on it
+	TCCR0B=0;	// Disable Timer0 (only needed for millis())
 	}
 
 void enable_SPI_and_SD_card()
 {
+	TCCR0B=(1 << CS00) + (1 << CS01);	// Enable Timer0 - needed for millis()
+
 		// Set SD_MODE=play left channel
 	DDRD|=(1 << AUDIO_SD_MODE_PIN);
 	PORTD|=(1 << AUDIO_SD_MODE_PIN);
@@ -489,6 +492,12 @@ uchar SD_card_Acommand(const uchar cmd,const ulong arg,const uchar crc=0xff)
 
 void setup(void)
 {
+	// Disable timers and ADC that were enabled by wiring.c init()
+	TCCR0B=0;	// Disable Timer0 (only needed for millis())
+	TCCR1B=0;
+	TCCR2B=0;
+	ADCSRA=0;
+
 	DDRB=(1 << AUDIO_BCLK_PIN) + (1 << AUDIO_DATA_PIN) +
 			(1 << SPI_MOSI_PIN) + (1 << SPI_SCK_PIN) + (1 << SPI_DEFAULT_SS_PIN);
 	DDRC=(1 << SD_CARD_CS_PIN);
@@ -548,6 +557,7 @@ bool init_SD_card(void)
 {		// Returns true on success
 
 	Serial.println("Initing SD card");
+	Serial.flush();
 
 	if (!reset_SD_card())
 		return false;
@@ -824,6 +834,8 @@ ISR(TIMER2_OVF_vect) {}		// Do nothing, just wake up from sleep
 
 void low_power_sleep(const uchar timer_counts)
 {
+	Serial.flush();
+
 	cli();
 	ASSR=0;								// Disable Timer2 asynchronous operation
 	TCCR2A=0;							// Timer2 Normal mode
@@ -865,8 +877,10 @@ void loop(void)
 	{ for (ushort i=0;i < lenof(state_entering_counts);i++)
 		state_entering_counts[i]=0; }
 
-	while (!read_interaction_script())
-		delay(500);		// Use low-power sleep?
+	while (!read_interaction_script()) {
+		for (uchar i=0;i < (uchar)(TIMER2_CLOCKS_PER_SEC/(2*255));i++)
+			low_power_sleep(0xff);
+		}
 
 	uchar cur_interaction_state_idx=0xff;
 
@@ -990,15 +1004,4 @@ void loop(void)
 			last_written_log_interval_nr=log_interval_nr;
 			}
 		}
-
-	delay(2000);
-	if (start_SD_card_read(0UL))
-		SD_card_read_blocks(2);
-
-	ushort last_played_value=0;
-	cli();
-	while (1)
-		last_played_value=play_sound(2*AUDIO_SAMPLE_RATE);
-	disable_SPI_and_SD_card();
-	sei();
 	}
