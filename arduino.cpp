@@ -17,10 +17,12 @@ typedef signed long slong;
 
 #define NR_OF_ADC_MEASUREMENTS_TO_IGNORE	1
 #define ADC_SINGLE_MEASUREMENT_SECONDS	(2*(25 + NR_OF_ADC_MEASUREMENTS_TO_IGNORE*13)/(float)F_CPU)
-#define TIMER2_CLOCKS_PER_SEC			(F_CPU/256)
+#define CLOCK_STARTUP_CYCLES			16384		// Determined by CKSEL fuses
+#define TIMER2_PRESCALER				256
+#define TIMER2_CLOCKS_PER_SEC			(F_CPU/TIMER2_PRESCALER)
+#define POWER_DOWN_SLEEP_MS				((2048+115/2) / 115)
 
-#define ADC_MEASUREMENTS_PER_SEC		500
-#define NR_OF_MEASUREMENTS_IN_BATCH		10
+#define ADC_MEASUREMENTS_PER_SEC		250
 #define MIN_ADC_THRESHOLD				10
 
 #define MIN_SD_CARD_LOG_BLOCK_IDX	( 200UL*1024UL*(1024/512))
@@ -867,6 +869,33 @@ void low_power_sleep(const uchar timer_counts)
 	SMCR=0;
 	}
 
+ISR(WDT_vect) {}		// Do nothing, just wake up from sleep
+
+void power_down_sleep(void)
+{
+	Serial.flush();
+
+	cli();
+	__asm__ __volatile__(
+		"wdr		\n\t"\
+		"sts %0,%1	\n\t"\
+		"sts %0,%2	\n\t"\
+		: /* no outputs */
+		: "n" (_SFR_MEM_ADDR(WDTCSR)),
+		"r" ((uchar)((1 << WDCE) + (1 << WDE))),
+		"r" ((uchar)((1 << WDIE)))		// Select 16ms sleep
+		);
+    sei();
+
+	SMCR=(0 << SM2) + (1 << SM1) + (0 << SM0) + (1 << SE);	// Select "Power down" sleep mode
+
+	sleep_bod_disable();
+	sleep_cpu();	// CPU is put to sleep now
+
+	// After wakeup, execution resumes from this point
+	SMCR=0;
+	}
+
 void loop(void)
 {
 	/*
@@ -892,15 +921,17 @@ void loop(void)
 		state_entering_counts[i]=0; }
 
 	while (!read_interaction_script()) {
-		for (uchar i=0;i < (uchar)(TIMER2_CLOCKS_PER_SEC/(2*255));i++)
-			low_power_sleep(0xff);
+		for (uchar i=0;i < (uchar)(500/POWER_DOWN_SLEEP_MS);i++)
+			power_down_sleep();
 		}
 
 	uchar cur_interaction_state_idx=0xff;
+	ushort measurements_since_threshold_exceeded=0xffff;
 
 	uchar last_knock_idx=next_knock_idx;
 	while (1) {
-		{ for (uchar i=NR_OF_MEASUREMENTS_IN_BATCH;i;i--) {
+		uchar short_sleeps_done=0;
+		{ for (uchar i=10;i;i--) {
 			ADCSRA=(1 << ADEN) + (1 << ADIE) + (1 << ADIF);	// Enable ADC, select Fosc/2, clear interrupt flag
 			ignore_measurements_counter=NR_OF_ADC_MEASUREMENTS_TO_IGNORE;
 
@@ -918,11 +949,25 @@ void loop(void)
 
 			ADCSRA=0;		// Disable ADC
 
-			low_power_sleep((uchar)(TIMER2_CLOCKS_PER_SEC *
-										(1.0f/ADC_MEASUREMENTS_PER_SEC - ADC_SINGLE_MEASUREMENT_SECONDS)));
+			if (ADC_threshold > MIN_ADC_THRESHOLD)
+				measurements_since_threshold_exceeded=0;
+			else if (measurements_since_threshold_exceeded < 0xffff)
+				measurements_since_threshold_exceeded++;
+
+			if (cur_interaction_state_idx >= MAX_INTERACTION_STATES &&
+									measurements_since_threshold_exceeded > 10*ADC_MEASUREMENTS_PER_SEC) {
+				power_down_sleep();
+				cur_milliseconds+=POWER_DOWN_SLEEP_MS;
+				}
+			else {
+				low_power_sleep((uchar)(TIMER2_CLOCKS_PER_SEC *
+										(1.0f/ADC_MEASUREMENTS_PER_SEC - ADC_SINGLE_MEASUREMENT_SECONDS) -
+										CLOCK_STARTUP_CYCLES/TIMER2_PRESCALER));
+				short_sleeps_done++;
+				}
 			}}
 
-		cur_milliseconds+=1000UL*NR_OF_MEASUREMENTS_IN_BATCH / ADC_MEASUREMENTS_PER_SEC;
+		cur_milliseconds+=1000*short_sleeps_done / ADC_MEASUREMENTS_PER_SEC;
 
 		/*
 		const ushort delta=knocks_done - knocks_printed;
@@ -1013,6 +1058,16 @@ void loop(void)
 		const ushort log_interval_nr=(ushort)(cur_milliseconds >> 20);		// One interval per ca 17min
 		if (log_interval_nr != last_written_log_interval_nr && cur_interaction_state_idx == 0xff) {
 			write_status_to_SD_card(0x01);
+
+			/*
+			Serial.print(short_sleeps_done);
+			Serial.print(" ");
+			Serial.print(cur_interaction_state_idx);
+			Serial.print(" ");
+			Serial.print(measurements_since_threshold_exceeded);
+			Serial.print("\n");
+			*/
+
 			Serial.flush();
 
 			last_written_log_interval_nr=log_interval_nr;
