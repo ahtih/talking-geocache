@@ -24,7 +24,7 @@ LDADD += -lm
 LIBS = HardwareSerial.o Print.o Tone.o SPI.o WString.o WInterrupts.o main.o \
 	wiring.o wiring_analog.o wiring_digital.o wiring_pulse.o wiring_shift.o
 
-PROGS = arduino
+PROGS = arduino power-down-sleep
 
 all: $(PROGS:%=%.hex)
 
