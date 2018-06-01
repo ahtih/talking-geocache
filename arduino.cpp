@@ -30,6 +30,18 @@ typedef signed long slong;
 
 #define MAX_INTERACTION_STATES		25
 
+#define AUDIO_LRCLK_PIN		PD7
+#define AUDIO_SD_MODE_PIN	PD6
+#define SD_CARD_VCC_PINS	((1 << PD5) + (1 << PD4) + (1 << PD3) + (1 << PD2))
+#define AUDIO_BCLK_PIN		PB0
+#define AUDIO_DATA_PIN		PB1
+
+#define SPI_SCK_PIN			PB5
+#define SPI_MISO_PIN		PB4
+#define SPI_MOSI_PIN		PB3
+#define SPI_DEFAULT_SS_PIN	PB2
+#define SD_CARD_CS_PIN		PC0
+
 /*		DATA	BCLK	LRCLK
 		PB1		PB0		PD7
 	*/
@@ -149,14 +161,15 @@ ushort play_sound(const ulong samples_to_play)
 #define PLAY_EMPTY_SET_LRCLK0()	\
 	{ uchar tmp;\
 	__asm__ __volatile__ (\
-		"ldi %0,0x40  \n\t"\
+		"ldi %0,%3    \n\t"\
 		"out %2,%0    \n\t"\
 		"out %1,%0    \n\t"\
 		"nop		  \n\t"\
 		"sbi %1,0     \n\t"	/* 2 clocks */ \
 					  \
 		: "=d" (tmp)			\
-		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD))); }
+		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD)), \
+													"M" (SD_CARD_VCC_PINS + (1 << AUDIO_SD_MODE_PIN))); }
 
 #define PLAY_LAST_3_BITS_SET_LRCLK1(reg)	\
 	{ uchar tmp;\
@@ -168,7 +181,7 @@ ushort play_sound(const ulong samples_to_play)
 		"sbi %2,0     \n\t"	/* 2 clocks */ \
 					  \
 		"andi %0,0xfe \n\t"\
-		"ldi %1,0xc0  \n\t"\
+		"ldi %1,%4    \n\t"\
 		"out %2,%0    \n\t"\
 		"lsr %0       \n\t"\
 		"sbi %2,0     \n\t"	/* 2 clocks */ \
@@ -180,7 +193,8 @@ ushort play_sound(const ulong samples_to_play)
 		"sbi %2,0     \n\t"	/* 2 clocks */ \
 					  \
 		: "+d" (reg), "=d" (tmp)			\
-		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD))); }
+		: "I" (_SFR_IO_ADDR(PORTB)), "I" (_SFR_IO_ADDR(PORTD)), \
+							"M" (SD_CARD_VCC_PINS + (1 << AUDIO_SD_MODE_PIN) + (1 << AUDIO_LRCLK_PIN))); }
 
 #define PLAY_EMPTY_2_BITS_AND_LOOP_END()	\
 	__asm__ __volatile__ (\
@@ -397,17 +411,6 @@ ushort play_sound(const ulong samples_to_play)
 	return (((ushort)val_hi) << 8) + val_lo;
 	}
 
-#define AUDIO_LRCLK_PIN		PD7
-#define AUDIO_SD_MODE_PIN	PD6
-#define AUDIO_BCLK_PIN		PB0
-#define AUDIO_DATA_PIN		PB1
-
-#define SPI_SCK_PIN			PB5
-#define SPI_MISO_PIN		PB4
-#define SPI_MOSI_PIN		PB3
-#define SPI_DEFAULT_SS_PIN	PB2
-#define SD_CARD_CS_PIN		PC0
-
 void SPI_send_byte(const uchar value)
 {
 	SPDR=value;
@@ -433,10 +436,12 @@ void SD_card_wait_busy(const ushort timeout_ms)
 void disable_SPI_and_SD_card()
 {
 		// Set SD_MODE=shutdown
-	DDRD&=(uchar)~(1 << AUDIO_SD_MODE_PIN);
-	PORTD&=(uchar)~(1 << AUDIO_SD_MODE_PIN);
+	DDRD&=(uchar)~((1 << AUDIO_SD_MODE_PIN) + SD_CARD_VCC_PINS);
+	PORTD&=(uchar)~((1 << AUDIO_SD_MODE_PIN) + SD_CARD_VCC_PINS);
 
-	PORTC|=(1 << SD_CARD_CS_PIN);
+	DDRC=0;		// Set SD_CARD_CS_PIN as input
+	PORTC&=~(1 << SD_CARD_CS_PIN);
+
 	SPCR=0;		// Disable SPI
 
 	PORTB=0;	// Make sure PORTB5 is LOW, since it has a LED on it
@@ -448,9 +453,10 @@ void enable_SPI_and_SD_card()
 	TCCR0B=(1 << CS00) + (1 << CS01);	// Enable Timer0 - needed for millis()
 
 		// Set SD_MODE=play left channel
-	DDRD|=(1 << AUDIO_SD_MODE_PIN);
-	PORTD|=(1 << AUDIO_SD_MODE_PIN);
+	DDRD|=(1 << AUDIO_SD_MODE_PIN) + SD_CARD_VCC_PINS;
+	PORTD|=(1 << AUDIO_SD_MODE_PIN) + SD_CARD_VCC_PINS;
 
+	DDRC=(1 << SD_CARD_CS_PIN);
 	PORTC&=(uchar)~(1 << SD_CARD_CS_PIN);
 
 	// Init SPI at Fosc/16 = 500kHz
@@ -516,7 +522,6 @@ void setup(void)
 
 	DDRB=(1 << AUDIO_BCLK_PIN) + (1 << AUDIO_DATA_PIN) +
 			(1 << SPI_MOSI_PIN) + (1 << SPI_SCK_PIN) + (1 << SPI_DEFAULT_SS_PIN);
-	DDRC=(1 << SD_CARD_CS_PIN);
 	DDRD=(1 << AUDIO_LRCLK_PIN);
 
 	disable_SPI_and_SD_card();
