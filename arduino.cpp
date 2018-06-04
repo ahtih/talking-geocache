@@ -76,8 +76,12 @@ static ushort state_entering_counts[MAX_INTERACTION_STATES];
 static uchar cur_session_log[100];
 static uchar cur_session_log_idx=0;
 
+static ushort voltage_measurements_ringbuffer[16];
+static uchar next_voltage_measurement_idx=0;
+
 static ulong log_writing_SD_card_block_idx=0UL;
 static ushort last_written_log_interval_nr=0;
+static ushort last_voltage_measurement_interval_nr=0;
 
 /*
 ushort sound_data[128]={
@@ -527,10 +531,14 @@ void setup(void)
 	disable_SPI_and_SD_card();
 
 	// ADCSRB=0;		// ADC Free Running mode; needed only when not using sleep mode
-	ADMUX=(1 << REFS1) + (1 << REFS0) + (1 << ADLAR) + 1;	// Select 1.1V ADC reference and ADC channel 1
-	DIDR0=(1 << ADC1D);
+	DIDR0=(1 << ADC1D);	// ADC6 has no digital input buffer on ATmega328p
 
 	Serial.begin(9600);
+	}
+
+void set_ADC_channel(const uchar channel)
+{
+	ADMUX=(1 << REFS1) + (1 << REFS0) + (1 << ADLAR) + channel;	// Select 1.1V ADC reference
 	}
 
 ushort bitreverse(ushort value)
@@ -712,7 +720,19 @@ bool write_status_to_SD_card(const uchar reason_code)
 	{ for (uchar i=0;i < cur_session_log_idx;i++)
 		SPI_send_byte(cur_session_log[i]); }
 
-	{ for (ushort i=0;i < 512-8-1-4-2*lenof(state_entering_counts)-cur_session_log_idx;i++)
+	{ uchar idx=next_voltage_measurement_idx;
+	for (uchar i=0;i < lenof(voltage_measurements_ringbuffer);i++) {
+		if (idx)
+			idx--;
+		else
+			idx=lenof(voltage_measurements_ringbuffer)-1;
+
+		SPI_send_byte( voltage_measurements_ringbuffer[idx]       & 0xff);
+		SPI_send_byte((voltage_measurements_ringbuffer[idx] >> 8) & 0xff);
+		}}
+
+	{ for (ushort i=0;i < 512-8-1-4-2*lenof(state_entering_counts)-cur_session_log_idx-
+															2*lenof(voltage_measurements_ringbuffer);i++)
 		SPI_send_byte(0xff); }
 
 	SPI_send_byte(0xff);	// Dummy CRC
@@ -925,6 +945,9 @@ void loop(void)
 	{ for (ushort i=0;i < lenof(state_entering_counts);i++)
 		state_entering_counts[i]=0; }
 
+	{ for (uchar i=0;i < lenof(voltage_measurements_ringbuffer);i++)
+		voltage_measurements_ringbuffer[i]=0xffffU; }
+
 	while (!read_interaction_script()) {
 		for (uchar i=0;i < (uchar)(500/POWER_DOWN_SLEEP_MS);i++)
 			power_down_sleep();
@@ -935,6 +958,8 @@ void loop(void)
 
 	uchar last_knock_idx=next_knock_idx;
 	while (1) {
+		set_ADC_channel(1);
+
 		uchar short_sleeps_done=0;
 		{ for (uchar i=10;i;i--) {
 			ADCSRA=(1 << ADEN) + (1 << ADIE) + (1 << ADIF);	// Enable ADC, select Fosc/2, clear interrupt flag
@@ -1060,7 +1085,37 @@ void loop(void)
 			Serial.flush();
 			}
 
-		const ushort log_interval_nr=(ushort)(cur_milliseconds >> 20);		// One interval per ca 17min
+		{ const ushort voltage_measurement_interval_nr=(ushort)(cur_milliseconds >> 16);	// One interval per ca 1min
+		if (voltage_measurement_interval_nr != last_voltage_measurement_interval_nr) {
+			last_voltage_measurement_interval_nr=voltage_measurement_interval_nr;
+
+			set_ADC_channel(6);
+
+			ADCSRA=(1 << ADEN) + (1 << ADIE) + (1 << ADIF);	// Enable ADC, select Fosc/2, clear interrupt flag
+			ignore_measurements_counter=1;
+
+			SMCR=(1 << SM0) + (1 << SE);	// Select "ADC Noise Reduction" sleep mode
+			sleep_cpu();	// CPU is put to sleep now, and ADC measurement is triggered
+			// After ADC interrupt, execution resumes from this point
+			SMCR=0;
+
+			ushort ADC_value=(ADCL >> 6);
+			ADC_value+=(((ushort)ADCH) << 2);
+
+			ADCSRA=0;		// Disable ADC
+
+			voltage_measurements_ringbuffer[next_voltage_measurement_idx]=ADC_value;
+			next_voltage_measurement_idx++;
+			if (next_voltage_measurement_idx >= lenof(voltage_measurements_ringbuffer))
+				next_voltage_measurement_idx=0;
+
+			Serial.print("Measured voltage ADC value ");
+			Serial.print(ADC_value);
+			Serial.print("\n");
+			Serial.flush();
+			}}
+
+		{ const ushort log_interval_nr=(ushort)(cur_milliseconds >> 20);		// One interval per ca 17min
 		if (log_interval_nr != last_written_log_interval_nr && cur_interaction_state_idx == 0xff) {
 			write_status_to_SD_card(0x01);
 
@@ -1076,6 +1131,6 @@ void loop(void)
 			Serial.flush();
 
 			last_written_log_interval_nr=log_interval_nr;
-			}
+			}}
 		}
 	}
