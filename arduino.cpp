@@ -15,7 +15,7 @@ typedef signed long slong;
 
 #define AUDIO_SAMPLE_RATE				(F_CPU/(6*2*16))
 
-#define NR_OF_ADC_MEASUREMENTS_TO_IGNORE	1
+#define NR_OF_ADC_MEASUREMENTS_TO_IGNORE			1
 #define ADC_SINGLE_MEASUREMENT_SECONDS	(2*(25 + NR_OF_ADC_MEASUREMENTS_TO_IGNORE*13)/(float)F_CPU)
 #define CLOCK_STARTUP_CYCLES			16384		// Determined by CKSEL fuses
 #define TIMER2_PRESCALER				256
@@ -54,6 +54,7 @@ static volatile uchar ADC_measurements_counter=0;
 static volatile ulong cur_milliseconds=0;
 static volatile ushort ADC_measurements_since_knock_shift4=0;
 static volatile uchar ignore_measurements_counter=0;
+static volatile uchar max_ADC_threshold=0;
 
 struct knock_t {
 	uchar max_ADC_value;
@@ -78,6 +79,8 @@ static uchar cur_session_log_idx=0;
 
 static ushort voltage_measurements_ringbuffer[16];
 static uchar next_voltage_measurement_idx=0;
+
+static ushort ADC_low_values_histogram[25];
 
 static ulong log_writing_SD_card_block_idx=0UL;
 static ushort last_written_log_interval_nr=0;
@@ -712,6 +715,9 @@ bool write_status_to_SD_card(const uchar reason_code)
 	SPI_send_byte((cur_milliseconds >> 16) & 255);
 	SPI_send_byte((cur_milliseconds >> 24) & 255);
 
+	SPI_send_byte(max_ADC_threshold);
+	max_ADC_threshold=0;
+
 	{ for (uchar i=0;i < lenof(state_entering_counts);i++) {
 		SPI_send_byte((state_entering_counts[i]      ) & 255);
 		SPI_send_byte((state_entering_counts[i] >>  8) & 255);
@@ -719,6 +725,10 @@ bool write_status_to_SD_card(const uchar reason_code)
 
 	{ for (uchar i=0;i < cur_session_log_idx;i++)
 		SPI_send_byte(cur_session_log[i]); }
+
+	{ for (ushort i=0;i < 512-8-1-4-1-2*lenof(state_entering_counts)-cur_session_log_idx-
+						2*lenof(voltage_measurements_ringbuffer) - 2*lenof(ADC_low_values_histogram);i++)
+		SPI_send_byte(0xff); }
 
 	{ uchar idx=next_voltage_measurement_idx;
 	for (uchar i=0;i < lenof(voltage_measurements_ringbuffer);i++) {
@@ -731,9 +741,11 @@ bool write_status_to_SD_card(const uchar reason_code)
 		SPI_send_byte((voltage_measurements_ringbuffer[idx] >> 8) & 0xff);
 		}}
 
-	{ for (ushort i=0;i < 512-8-1-4-2*lenof(state_entering_counts)-cur_session_log_idx-
-															2*lenof(voltage_measurements_ringbuffer);i++)
-		SPI_send_byte(0xff); }
+	{ for (uchar i=0;i < lenof(ADC_low_values_histogram);i++) {
+		SPI_send_byte( ADC_low_values_histogram[i]       & 0xff);
+		SPI_send_byte((ADC_low_values_histogram[i] >> 8) & 0xff);
+		ADC_low_values_histogram[i]=0;
+		}}
 
 	SPI_send_byte(0xff);	// Dummy CRC
 	SPI_send_byte(0xff);	// Dummy CRC
@@ -802,12 +814,17 @@ ISR(ADC_vect)
 			ADC_measurements_since_knock_shift4=0;
 			}
 		ADC_threshold=ADC_value;
+
+		max_ADC_threshold=max(max_ADC_threshold,ADC_threshold);
 		}
 
 	{ uchar * const p=&knocks_ringbuffer[(next_knock_idx + lenof(knocks_ringbuffer) - 1) &
 																(lenof(knocks_ringbuffer)-1)].max_ADC_value;
 	if (*p < ADC_value)
 		*p = ADC_value; }
+
+	if (ADC_value < lenof(ADC_low_values_histogram))
+		ADC_low_values_histogram[ADC_value]++;
 
 	update_ADC_random_crc(ADC_value);
 
@@ -948,6 +965,9 @@ void loop(void)
 	{ for (ushort i=0;i < lenof(state_entering_counts);i++)
 		state_entering_counts[i]=0; }
 
+	{ for (uchar i=0;i < lenof(ADC_low_values_histogram);i++)
+		ADC_low_values_histogram[i]=0; }
+
 	{ for (uchar i=0;i < lenof(voltage_measurements_ringbuffer);i++)
 		voltage_measurements_ringbuffer[i]=0xffffU; }
 
@@ -1001,6 +1021,13 @@ void loop(void)
 			}}
 
 		cur_milliseconds+=1000*short_sleeps_done / ADC_MEASUREMENTS_PER_SEC;
+
+		{ for (uchar i=0;i < lenof(ADC_low_values_histogram);i++)
+			if (ADC_low_values_histogram[i] >= 0x8000U) {
+				for (i=0;i < lenof(ADC_low_values_histogram);i++)
+					ADC_low_values_histogram[i]>>=1;
+				break;
+				}}
 
 		/*
 		const ushort delta=knocks_done - knocks_printed;
