@@ -923,6 +923,9 @@ void power_down_sleep(void)
 
 void loop(void)
 {
+	{ for (ushort i=0;i < (ushort)(10*1000/POWER_DOWN_SLEEP_MS);i++)
+		power_down_sleep(); }
+
 	/*
 	{ for (uchar i=0;i < 128;i++) {
 		sound_data[i]=bitreverse(
